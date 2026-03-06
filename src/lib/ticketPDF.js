@@ -68,7 +68,7 @@ export async function generarTicketPDF({ ticket, empresa, lineas }) {
   twoCol('IVA:', fmt(ticket.iva_total))
   sep('-')
   doc.setTextColor(0, 0, 0)
-  twoCol('TOTAL:', fmt(ticket.total), 11, true)
+  twoCol('TOTAL (IVA INCL.):', fmt(ticket.total), 10, true)
   sep('-')
   doc.setTextColor(30, 30, 30)
   nl(1)
