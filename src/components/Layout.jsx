@@ -3,11 +3,12 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { signOut } from '../lib/supabase'
 
 const NAV = [
-  { to: '/dashboard',    icon: '📊', label: 'Dashboard' },
-  { to: '/facturas',     icon: '🧾', label: 'Facturas' },
-  { to: '/tickets',      icon: '🏪', label: 'Caja / Tickets' },
-  { to: '/clientes',     icon: '👥', label: 'Clientes' },
-  { to: '/configuracion',icon: '⚙️', label: 'Configuración' },
+  { to: '/dashboard',     icon: '📊', label: 'Dashboard' },
+  { to: '/facturas',      icon: '🧾', label: 'Facturas' },
+  { to: '/presupuestos',  icon: '📋', label: 'Presupuestos' },
+  { to: '/tickets',       icon: '🏪', label: 'Caja / Tickets' },
+  { to: '/clientes',      icon: '👥', label: 'Clientes' },
+  { to: '/configuracion', icon: '⚙️', label: 'Configuración' },
 ]
 
 export default function Layout({ children, session }) {

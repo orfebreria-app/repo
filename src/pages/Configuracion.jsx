@@ -5,6 +5,15 @@ const empty = {
   nombre: '', nif_cif: '', email: '', telefono: '',
   direccion: '', ciudad: '', cp: '', pais: 'España',
   moneda: 'EUR', serie: 'FAC', iva_default: 21,
+  serie_presupuesto: 'PRE',
+  presupuesto_config: {
+    plantilla: 'moderna',
+    color: '#00C9A7',
+    titulo: 'PRESUPUESTO',
+    textoValidez: 'Este presupuesto tiene una validez de 30 días desde su fecha de emisión.',
+    textoPie: '¡Gracias por confiar en nosotros!',
+    condiciones: '',
+  }
 }
 
 export default function Configuracion({ session }) {
@@ -42,6 +51,12 @@ export default function Configuracion({ session }) {
   const f = (field) => ({
     value: form[field] ?? '',
     onChange: e => setForm({ ...form, [field]: e.target.value })
+  })
+
+  // Helper para campos dentro de presupuesto_config
+  const pc = (field) => ({
+    value: form.presupuesto_config?.[field] ?? '',
+    onChange: e => setForm({ ...form, presupuesto_config: { ...(form.presupuesto_config||{}), [field]: e.target.value } })
   })
 
   const handleSave = async (e) => {
@@ -150,6 +165,11 @@ export default function Configuracion({ session }) {
             <p className="text-xs text-gray-600 mt-1">Ejemplo: FAC-0001</p>
           </div>
           <div>
+            <label className="label">Serie de presupuestos</label>
+            <input className="input font-mono" placeholder="PRE" maxLength={10} {...f('serie_presupuesto')} />
+            <p className="text-xs text-gray-600 mt-1">Ejemplo: PRE-0001</p>
+          </div>
+          <div>
             <label className="label">Moneda</label>
             <select className="input" {...f('moneda')}>
               <option value="EUR">EUR — Euro (€)</option>
@@ -166,6 +186,81 @@ export default function Configuracion({ session }) {
               <option value="10">10% (Reducido)</option>
               <option value="21">21% (General)</option>
             </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Plantilla de presupuesto */}
+      <div className="card space-y-5">
+        <div>
+          <h2 className="font-bold text-white">📋 Plantilla de presupuesto</h2>
+          <p className="text-xs text-gray-500 mt-1">Personaliza el aspecto y los textos que aparecerán en todos tus presupuestos PDF.</p>
+        </div>
+
+        {/* Diseño */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Estilo de plantilla</label>
+            <select className="input" value={form.presupuesto_config?.plantilla||'moderna'}
+              onChange={e => setForm({...form, presupuesto_config:{...(form.presupuesto_config||{}), plantilla:e.target.value}})}>
+              <option value="moderna">Moderna — Cabecera con color</option>
+              <option value="clasica">Clásica — Líneas profesionales</option>
+              <option value="minimalista">Minimalista — Elegante y limpia</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Color principal</label>
+            <div className="flex items-center gap-3">
+              <input type="color" className="h-10 w-16 rounded-lg border border-gray-700 bg-gray-800 cursor-pointer"
+                value={form.presupuesto_config?.color||'#00C9A7'}
+                onChange={e => setForm({...form, presupuesto_config:{...(form.presupuesto_config||{}), color:e.target.value}})} />
+              <div className="flex gap-2 flex-wrap">
+                {['#00C9A7','#1D4ED8','#059669','#DC2626','#7C3AED','#D97706','#111827'].map(c => (
+                  <button key={c} type="button" title={c}
+                    onClick={() => setForm({...form, presupuesto_config:{...(form.presupuesto_config||{}), color:c}})}
+                    className={`w-6 h-6 rounded-full border-2 transition-all ${form.presupuesto_config?.color===c ? 'border-white scale-110' : 'border-transparent'}`}
+                    style={{background:c}} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Textos */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Título del documento</label>
+            <input className="input" placeholder="PRESUPUESTO" {...pc('titulo')} />
+            <p className="text-xs text-gray-600 mt-1">Ej: PRESUPUESTO, OFERTA, PROPUESTA</p>
+          </div>
+          <div>
+            <label className="label">Texto de pie de página</label>
+            <input className="input" placeholder="¡Gracias por confiar en nosotros!" {...pc('textoPie')} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="label">Texto de validez</label>
+            <input className="input" placeholder="Este presupuesto tiene una validez de 30 días." {...pc('textoValidez')} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="label">Condiciones por defecto</label>
+            <textarea className="input h-28 resize-none text-sm"
+              placeholder="Ej: Forma de pago: 50% a la confirmación y 50% a la entrega. Los precios no incluyen gastos de envío..."
+              value={form.presupuesto_config?.condiciones||''}
+              onChange={e => setForm({...form, presupuesto_config:{...(form.presupuesto_config||{}), condiciones:e.target.value}})} />
+            <p className="text-xs text-gray-600 mt-1">Estas condiciones aparecerán en todos los presupuestos. Puedes modificarlas individualmente al crear cada uno.</p>
+          </div>
+        </div>
+
+        {/* Preview */}
+        <div className="bg-gray-800/30 border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-3">Vista previa</div>
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-12 rounded-full flex-shrink-0" style={{background: form.presupuesto_config?.color||'#00C9A7'}} />
+            <div>
+              <div className="font-bold text-white">{form.presupuesto_config?.titulo||'PRESUPUESTO'}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{form.presupuesto_config?.plantilla||'moderna'} · {form.serie_presupuesto||'PRE'}-0001</div>
+              <div className="text-xs text-gray-600 mt-1 italic">{form.presupuesto_config?.textoValidez||'Validez 30 días'}</div>
+            </div>
           </div>
         </div>
       </div>

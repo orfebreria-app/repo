@@ -9,6 +9,7 @@ import Facturas from './pages/Facturas'
 import NuevaFactura from './pages/NuevaFactura'
 import Configuracion from './pages/Configuracion'
 import Tickets from './pages/Tickets'
+import Presupuestos from './pages/Presupuestos'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -43,7 +44,8 @@ export default function App() {
         <Route path="/clientes"      element={<Clientes session={session} />} />
         <Route path="/facturas"      element={<Facturas session={session} />} />
         <Route path="/facturas/nueva"element={<NuevaFactura session={session} />} />
-        <Route path="/tickets"       element={<Tickets session={session} />} />
+        <Route path="/tickets"        element={<Tickets session={session} />} />
+        <Route path="/presupuestos"    element={<Presupuestos session={session} />} />
         <Route path="/configuracion" element={<Configuracion session={session} />} />
         <Route path="*"              element={<Navigate to="/dashboard" replace />} />
       </Routes>
