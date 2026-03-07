@@ -5,11 +5,17 @@ export default {
     extend: {
       colors: {
         brand: {
-          50:  '#edfcf8',
-          100: '#d2f9ef',
-          500: '#00C9A7',
-          600: '#00a889',
-          700: '#007d67',
+          50:  '#fdf8ec',
+          100: '#faefc8',
+          400: '#e0b84a',
+          500: '#C9A84C',
+          600: '#a8882e',
+          700: '#7d641e',
+        },
+        accent: {
+          500: '#C0282B',
+          600: '#9B1C1C',
+          700: '#7f1d1d',
         }
       },
       fontFamily: {

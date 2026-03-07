@@ -22,7 +22,7 @@ export const COLORES = [
 const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 const fmtFecha = (d) => d ? new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
 
-// Carga imagen como base64
+// Carga imagen como base64 y devuelve dimensiones originales
 const loadImage = (url) =>
   new Promise((resolve) => {
     const img = new Image()
@@ -31,13 +31,21 @@ const loadImage = (url) =>
       const canvas = document.createElement('canvas')
       canvas.width = img.width
       canvas.height = img.height
-      const ctx = canvas.getContext('2d')
-      ctx.drawImage(img, 0, 0)
-      resolve(canvas.toDataURL('image/png'))
+      canvas.getContext('2d').drawImage(img, 0, 0)
+      resolve({ data: canvas.toDataURL('image/png'), w: img.width, h: img.height })
     }
     img.onerror = () => resolve(null)
     img.src = url
   })
+
+// Calcula dimensiones en mm respetando proporciones del logo
+const logoSize = (img, maxW, maxH) => {
+  if (!img) return { w: 0, h: 0 }
+  const ratio = img.w / img.h
+  let w = maxW, h = maxW / ratio
+  if (h > maxH) { h = maxH; w = maxH * ratio }
+  return { w: +w.toFixed(1), h: +h.toFixed(1) }
+}
 
 // ─── GENERADOR PRINCIPAL ──────────────────────────────────
 export async function generarPDF({ factura, empresa, conceptos, plantilla = 'moderna', colorId = 'azul', logoUrl = null }) {
@@ -83,14 +91,15 @@ async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoD
 
   // Logo en cabecera
   if (logoData) {
-    try { doc.addImage(logoData, 'PNG', M, 8, 30, 30) } catch(e) {}
+    const { w: lw, h: lh } = logoSize(logoData, 25, 38)
+    try { doc.addImage(logoData.data, 'PNG', M, 3, lw, lh) } catch(e) {}
   }
 
   // Nombre empresa en cabecera
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(20)
   doc.setFont('helvetica', 'bold')
-  const nombreX = logoData ? M + 35 : M
+  const nombreX = logoData ? M + 28 : M
   doc.text(empresa?.nombre || 'Mi Empresa', nombreX, 20)
 
   doc.setFontSize(9)
@@ -213,14 +222,15 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
 
   // Logo
   if (logoData) {
-    try { doc.addImage(logoData, 'PNG', M, y, 35, 25) } catch(e) {}
+    const { w: lw, h: lh } = logoSize(logoData, 25, 35)
+    try { doc.addImage(logoData.data, 'PNG', M, y, lw, lh) } catch(e) {}
   }
 
   // Nombre empresa
   doc.setFontSize(18)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(r, g, b)
-  const exOff = logoData ? M + 40 : M
+  const exOff = logoData ? M + 28 : M
   doc.text(empresa?.nombre || 'Mi Empresa', exOff, y + 10)
 
   doc.setFontSize(8)
@@ -353,8 +363,9 @@ async function plantillaMinimalista(doc, { factura, empresa, conceptos, color, l
 
   // Logo
   if (logoData) {
-    try { doc.addImage(logoData, 'PNG', M + 5, y, 28, 20) } catch(e) {}
-    y += 25
+    const { w: lw, h: lh } = logoSize(logoData, 22, 32)
+    try { doc.addImage(logoData.data, 'PNG', M + 5, y, lw, lh) } catch(e) {}
+    y += lh + 5
   }
 
   // Empresa

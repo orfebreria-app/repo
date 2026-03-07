@@ -12,11 +12,19 @@ const loadImage = (url) =>
       const canvas = document.createElement('canvas')
       canvas.width = img.width; canvas.height = img.height
       canvas.getContext('2d').drawImage(img, 0, 0)
-      resolve(canvas.toDataURL('image/png'))
+      resolve({ data: canvas.toDataURL('image/png'), w: img.width, h: img.height })
     }
     img.onerror = () => resolve(null)
     img.src = url
   })
+
+const logoSize = (img, maxW, maxH) => {
+  if (!img) return { w: 0, h: 0 }
+  const ratio = img.w / img.h
+  let w = maxW, h = maxW / ratio
+  if (h > maxH) { h = maxH; w = maxH * ratio }
+  return { w: +w.toFixed(1), h: +h.toFixed(1) }
+}
 
 // config = presupuesto_config de la empresa
 export async function generarPresupuestoPDF({ presupuesto, empresa, conceptos }) {
@@ -72,11 +80,14 @@ async function plantillaModerna(doc, { presupuesto, empresa, conceptos, rgb, log
   doc.setFillColor(r,g,b)
   doc.rect(0, 0, W, 45, 'F')
 
-  if (logoData) { try { doc.addImage(logoData, 'PNG', M, 8, 30, 30) } catch(e){} }
+  if (logoData) {
+    const { w: lw, h: lh } = logoSize(logoData, 25, 38)
+    try { doc.addImage(logoData.data, 'PNG', M, 3, lw, lh) } catch(e){}
+  }
 
   doc.setTextColor(255,255,255)
   doc.setFontSize(20); doc.setFont('helvetica','bold')
-  const nx = logoData ? M+35 : M
+  const nx = logoData ? M+28 : M
   doc.text(empresa?.nombre || 'Mi Empresa', nx, 20)
   doc.setFontSize(9); doc.setFont('helvetica','normal')
   if (empresa?.nif_cif)   doc.text(`NIF/CIF: ${empresa.nif_cif}`, nx, 27)
@@ -189,8 +200,11 @@ async function plantillaClasica(doc, { presupuesto, empresa, conceptos, rgb, log
   const [r,g,b] = rgb
   let y = M
 
-  if (logoData) { try { doc.addImage(logoData,'PNG',M,y,35,25) } catch(e){} }
-  const ex = logoData ? M+40 : M
+  if (logoData) {
+    const { w: lw, h: lh } = logoSize(logoData, 25, 35)
+    try { doc.addImage(logoData.data,'PNG',M,y,lw,lh) } catch(e){}
+  }
+  const ex = logoData ? M+28 : M
   doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(r,g,b)
   doc.text(empresa?.nombre||'Mi Empresa', ex, y+10)
   doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(80,80,80)
@@ -271,7 +285,11 @@ async function plantillaMinimalista(doc, { presupuesto, empresa, conceptos, rgb,
   const [r,g,b] = rgb
   doc.setFillColor(r,g,b); doc.rect(0,0,4,297,'F')
   let y=M+5
-  if (logoData) { try { doc.addImage(logoData,'PNG',M+5,y,28,20) } catch(e){}; y+=25 }
+  if (logoData) {
+    const { w: lw, h: lh } = logoSize(logoData, 22, 32)
+    try { doc.addImage(logoData.data,'PNG',M+5,y,lw,lh) } catch(e){}
+    y += lh + 5
+  }
   doc.setFontSize(16); doc.setFont('helvetica','bold'); doc.setTextColor(20,20,20)
   doc.text(empresa?.nombre||'Mi Empresa',M+5,y); y+=7
   doc.setFontSize(8); doc.setFont('helvetica','normal'); doc.setTextColor(120,120,120)
