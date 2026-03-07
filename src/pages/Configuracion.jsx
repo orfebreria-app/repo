@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { getEmpresa, upsertEmpresa, supabase } from '../lib/supabase'
+import { PLANTILLAS, COLORES } from '../lib/pdfGenerator'
 
 const empty = {
   nombre: '', nif_cif: '', email: '', telefono: '',
   direccion: '', ciudad: '', cp: '', pais: 'España',
   moneda: 'EUR', serie: 'FAC', iva_default: 21,
   serie_presupuesto: 'PRE',
+  factura_config: {
+    plantilla: 'moderna',
+    colorId: 'azul',
+  },
   presupuesto_config: {
     plantilla: 'moderna',
-    color: '#00C9A7',
+    color: '#C9A84C',
     titulo: 'PRESUPUESTO',
     textoValidez: 'Este presupuesto tiene una validez de 30 días desde su fecha de emisión.',
     textoPie: '¡Gracias por confiar en nosotros!',
@@ -188,6 +193,51 @@ export default function Configuracion({ session }) {
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Plantilla de factura */}
+      <div className="card space-y-5">
+        <div>
+          <h2 className="font-bold text-white">🧾 Plantilla de factura</h2>
+          <p className="text-xs text-gray-500 mt-1">Estilo y color por defecto al descargar facturas en PDF.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="label">Estilo de plantilla</label>
+            <select className="input" value={form.factura_config?.plantilla||'moderna'}
+              onChange={e => setForm({...form, factura_config:{...(form.factura_config||{}), plantilla:e.target.value}})}>
+              {PLANTILLAS.map(p => <option key={p.id} value={p.id}>{p.nombre} — {p.desc}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Color principal</label>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {COLORES.map(c => (
+                <button key={c.id} type="button" title={c.nombre}
+                  onClick={() => setForm({...form, factura_config:{...(form.factura_config||{}), colorId:c.id}})}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs transition-all
+                    ${form.factura_config?.colorId===c.id ? 'border-white/40 bg-white/10 text-white' : 'border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                  <span className="w-3.5 h-3.5 rounded-full flex-shrink-0" style={{background:c.hex}} />
+                  {c.nombre}
+                  {form.factura_config?.colorId===c.id && <span>✓</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* Preview */}
+        <div className="bg-gray-800/30 border border-gray-700 rounded-xl p-4">
+          <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-3">Vista previa</div>
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-12 rounded-full flex-shrink-0"
+              style={{background: COLORES.find(c=>c.id===(form.factura_config?.colorId||'azul'))?.hex || '#1D4ED8'}} />
+            <div>
+              <div className="font-bold text-white">{PLANTILLAS.find(p=>p.id===(form.factura_config?.plantilla||'moderna'))?.nombre}</div>
+              <div className="text-xs text-gray-400 mt-0.5">{COLORES.find(c=>c.id===(form.factura_config?.colorId||'azul'))?.nombre} · {form.serie||'FAC'}-0001</div>
+            </div>
+          </div>
+        </div>
+        <p className="text-xs text-gray-600">También puedes cambiar plantilla y color al descargar cada factura individualmente.</p>
       </div>
 
       {/* Plantilla de presupuesto */}
