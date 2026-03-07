@@ -15,6 +15,8 @@ const ARTICULOS_RAPIDOS = [
   'Peana', 'Figura', 'Copa', 'Escudo', 'Llavero grabado', 'Placa conmemorativa',
 ]
 
+const CLAVE_BORRADO = '8323'
+
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
   descripcion: '',
@@ -42,6 +44,10 @@ export default function Tickets({ session }) {
   const [historial, setHistorial] = useState([])
   const [tab,       setTab]       = useState('caja')
   const [ticketOk,  setTicketOk]  = useState(null)
+  const [modalBorrar, setModalBorrar] = useState(false)
+  const [claveBorrar, setClaveBorrar] = useState('')
+  const [errorClave,  setErrorClave]  = useState('')
+  const [seleccionados, setSeleccionados] = useState(new Set())
   const descRef = useRef(null)
 
   useEffect(() => {
@@ -135,6 +141,44 @@ export default function Tickets({ session }) {
   const descargarPDF = async (ticket, lineasTicket) => {
     const doc = await generarTicketPDF({ ticket, empresa, lineas: lineasTicket })
     doc.save(`ticket-${String(ticket.numero).padStart(6,'0')}.pdf`)
+  }
+
+  const abrirModalBorrar = (ticket) => {
+    setModalBorrar(true)
+    setClaveBorrar('')
+    setErrorClave('')
+  }
+
+  const toggleSeleccion = (id) => {
+    setSeleccionados(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleTodos = () => {
+    if (seleccionados.size === historial.length) {
+      setSeleccionados(new Set())
+    } else {
+      setSeleccionados(new Set(historial.map(t => t.id)))
+    }
+  }
+
+  const confirmarBorrado = async () => {
+    if (claveBorrar !== CLAVE_BORRADO) {
+      setErrorClave('Contraseña incorrecta')
+      setClaveBorrar('')
+      return
+    }
+    for (const id of seleccionados) {
+      await supabase.from('lineas_ticket').delete().eq('ticket_id', id)
+      await supabase.from('tickets').delete().eq('id', id)
+    }
+    setModalBorrar(false)
+    setClaveBorrar('')
+    setSeleccionados(new Set())
+    await cargarHistorial(empresa.id)
   }
 
   // ── Pantalla cobrado ──────────────────────────────────
@@ -369,9 +413,36 @@ export default function Tickets({ session }) {
                   <div className="font-bold text-white text-lg">{historial.length}</div>
                 </div>
               </div>
+
+              {/* Barra de selección */}
+              {seleccionados.size > 0 && (
+                <div className="px-4 py-3 bg-red-900/20 border-b border-red-800/40 flex items-center justify-between gap-3">
+                  <span className="text-sm text-red-300 font-semibold">
+                    🗑 {seleccionados.size} ticket{seleccionados.size !== 1 ? 's' : ''} seleccionado{seleccionados.size !== 1 ? 's' : ''}
+                  </span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setSeleccionados(new Set())}
+                      className="text-xs text-gray-400 hover:text-white px-3 py-1.5 rounded-lg bg-gray-800 transition-colors">
+                      Cancelar
+                    </button>
+                    <button onClick={() => abrirModalBorrar()}
+                      className="text-xs text-white bg-red-700 hover:bg-red-600 px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1">
+                      🗑 Borrar seleccionados
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-800">
+                    <th className="py-3 px-4 w-10">
+                      <input type="checkbox"
+                        checked={seleccionados.size === historial.length && historial.length > 0}
+                        onChange={toggleTodos}
+                        className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-brand-500 cursor-pointer"
+                      />
+                    </th>
                     {['Nº','Fecha','Hora','Artículos','Método','Total (IVA incl.)',''].map(h => (
                       <th key={h} className="text-left py-3 px-4 text-xs text-gray-500 font-semibold uppercase tracking-wide">{h}</th>
                     ))}
@@ -380,8 +451,20 @@ export default function Tickets({ session }) {
                 <tbody>
                   {historial.map(t => {
                     const fecha = new Date(t.fecha)
+                    const seleccionado = seleccionados.has(t.id)
                     return (
-                      <tr key={t.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                      <tr key={t.id}
+                        className={`border-b border-gray-800/50 transition-colors cursor-pointer
+                          ${seleccionado ? 'bg-red-900/10 border-red-900/30' : 'hover:bg-gray-800/30'}`}
+                        onClick={() => toggleSeleccion(t.id)}
+                      >
+                        <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
+                          <input type="checkbox"
+                            checked={seleccionado}
+                            onChange={() => toggleSeleccion(t.id)}
+                            className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-brand-500 cursor-pointer"
+                          />
+                        </td>
                         <td className="py-3 px-4 font-mono text-xs text-gray-300">#{String(t.numero).padStart(6,'0')}</td>
                         <td className="py-3 px-4 text-gray-400 text-xs">{fecha.toLocaleDateString('es-ES')}</td>
                         <td className="py-3 px-4 text-gray-400 text-xs">{fecha.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'})}</td>
@@ -392,7 +475,7 @@ export default function Tickets({ session }) {
                           </span>
                         </td>
                         <td className="py-3 px-4 font-bold text-white">{formatEuro(t.total)}</td>
-                        <td className="py-3 px-4">
+                        <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
                           <button onClick={() => descargarPDF(t, t.lineas_ticket || [])}
                             className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                             🖨️ PDF
@@ -405,6 +488,49 @@ export default function Tickets({ session }) {
               </table>
             </>
           )}
+        </div>
+      )}
+
+      {/* Modal borrado con contraseña */}
+      {modalBorrar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => setModalBorrar(null)} />
+          <div className="relative bg-gray-900 border border-red-800/50 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="text-4xl mb-2">🔒</div>
+              <h3 className="text-lg font-bold text-white">Borrar ticket</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Ticket #{String(modalBorrar.numero).padStart(6,'0')} · {formatEuro(modalBorrar.total)}
+              </p>
+              <p className="text-xs text-red-400 mt-2">Esta acción no se puede deshacer</p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="label">Introduce la contraseña de borrado</label>
+              <input
+                className="input text-center text-xl font-mono tracking-widest"
+                type="password"
+                placeholder="••••"
+                value={claveBorrar}
+                onChange={e => { setClaveBorrar(e.target.value); setErrorClave('') }}
+                onKeyDown={e => e.key === 'Enter' && confirmarBorrado()}
+                autoFocus
+                maxLength={10}
+              />
+              {errorClave && (
+                <p className="text-red-400 text-sm text-center">⚠️ {errorClave}</p>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setModalBorrar(null)} className="btn-secondary flex-1">
+                Cancelar
+              </button>
+              <button onClick={confirmarBorrado} className="btn-danger flex-1">
+                🗑 Borrar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
