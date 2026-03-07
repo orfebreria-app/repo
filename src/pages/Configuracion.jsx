@@ -90,7 +90,7 @@ export default function Configuracion({ session }) {
         <div className="flex items-center gap-5 flex-wrap">
           {form.logo_url ? (
             <div className="relative">
-              <img src={form.logo_url} alt="Logo" className="h-20 max-w-[160px] object-contain rounded-lg border border-gray-700 bg-gray-800 p-2" />
+              <img src={form.logo_url} alt="Logo" className="max-h-20 max-w-[200px] w-auto h-auto object-contain rounded-lg border border-gray-700 bg-gray-800 p-2" />
               <button
                 type="button"
                 onClick={() => setForm(f => ({ ...f, logo_url: null }))}
