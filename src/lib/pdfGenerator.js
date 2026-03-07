@@ -52,17 +52,23 @@ export async function generarPDF({ factura, empresa, conceptos, plantilla = 'mod
   const color = COLORES.find(c => c.id === colorId) || COLORES[0]
   const doc   = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
 
-  const W = 210  // ancho A4
-  const M = 15   // margen
+  const W = 210
+  const M = 15
 
-  // Logo
+  // Toma config de empresa si existe
+  const cfg       = empresa?.factura_config || {}
+  const textoPie  = cfg.textoPie  || ''
+  const formaPago = cfg.formaPago || ''
+  const notasDefault = cfg.notas  || ''
+
   let logoData = null
   if (logoUrl) logoData = await loadImage(logoUrl)
 
-  // Despacha según plantilla
-  if (plantilla === 'moderna')      await plantillaModerna(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha })
-  else if (plantilla === 'clasica') await plantillaClasica(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha })
-  else                              await plantillaMinimalista(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha })
+  const extra = { textoPie, formaPago, notasDefault }
+
+  if (plantilla === 'moderna')      await plantillaModerna(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
+  else if (plantilla === 'clasica') await plantillaClasica(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
+  else                              await plantillaMinimalista(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
 
   // Pie de página
   const pages = doc.internal.getNumberOfPages()
@@ -71,9 +77,7 @@ export async function generarPDF({ factura, empresa, conceptos, plantilla = 'mod
     doc.setFontSize(8)
     doc.setTextColor(160, 160, 160)
     doc.text(`Página ${i} de ${pages}`, W / 2, 290, { align: 'center' })
-    if (empresa?.nombre) {
-      doc.text(empresa.nombre, M, 290)
-    }
+    if (empresa?.nombre) doc.text(empresa.nombre, M, 290)
   }
 
   return doc
@@ -82,7 +86,7 @@ export async function generarPDF({ factura, empresa, conceptos, plantilla = 'mod
 // ═══════════════════════════════════════════════════════
 // PLANTILLA: MODERNA
 // ═══════════════════════════════════════════════════════
-async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha }) {
+async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, textoPie, formaPago, notasDefault }) {
   const [r, g, b] = color.rgb
 
   // Cabecera con fondo de color
@@ -199,24 +203,45 @@ async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoD
   doc.setTextColor(r, g, b)
   doc.text(fmt(factura.total), totX + totW - 5, y + 26, { align: 'right' })
 
-  // Notas
-  if (factura.notas) {
+  // Notas factura o notas por defecto
+  const notasTexto = factura.notas || notasDefault
+  if (notasTexto) {
     y += 40
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(r, g, b)
-    doc.text('NOTAS / CONDICIONES DE PAGO', M, y)
+    doc.text('NOTAS / CONDICIONES', M, y)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(80, 80, 80)
-    const lines = doc.splitTextToSize(factura.notas, W - M * 2)
+    const lines = doc.splitTextToSize(notasTexto, W - M * 2)
     doc.text(lines, M, y + 6)
+    y += lines.length * 4 + 10
+  } else {
+    y += 40
+  }
+
+  // Forma de pago
+  if (formaPago) {
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text('FORMA DE PAGO', M, y)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(80, 80, 80)
+    doc.text(doc.splitTextToSize(formaPago, W - M * 2), M, y + 6)
+    y += 14
+  }
+
+  // Texto pie
+  if (textoPie) {
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text(textoPie, W / 2, y + 6, { align: 'center' })
   }
 }
-
 // ═══════════════════════════════════════════════════════
-// PLANTILLA: CLASICA
-// ═══════════════════════════════════════════════════════
-async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha }) {
+async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, textoPie, formaPago, notasDefault }) {
   const [r, g, b] = color.rgb
   let y = M
 
@@ -338,22 +363,38 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   doc.text('TOTAL:', totX, y)
   doc.text(fmt(factura.total), W - M, y, { align: 'right' })
 
-  if (factura.notas) {
+  if (factura.notas || notasDefault) {
     y += 14
+    const notasTexto = factura.notas || notasDefault
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(r, g, b)
-    doc.text('NOTAS', M, y); y += 5
+    doc.text('NOTAS / CONDICIONES', M, y); y += 5
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(80, 80, 80)
-    doc.text(doc.splitTextToSize(factura.notas, W - M * 2), M, y)
+    const notasLines = doc.splitTextToSize(notasTexto, W - M * 2)
+    doc.text(notasLines, M, y)
+    y += notasLines.length * 4 + 6
+  } else { y += 14 }
+
+  if (formaPago) {
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+    doc.text('FORMA DE PAGO', M, y); y += 5
+    doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
+    doc.text(doc.splitTextToSize(formaPago, W - M * 2), M, y)
+    y += 12
+  }
+
+  if (textoPie) {
+    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+    doc.text(textoPie, W / 2, y, { align: 'center' })
   }
 }
 
 // ═══════════════════════════════════════════════════════
 // PLANTILLA: MINIMALISTA
 // ═══════════════════════════════════════════════════════
-async function plantillaMinimalista(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha }) {
+async function plantillaMinimalista(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, textoPie, formaPago, notasDefault }) {
   const [r, g, b] = color.rgb
   let y = M + 5
 
@@ -462,11 +503,31 @@ async function plantillaMinimalista(doc, { factura, empresa, conceptos, color, l
   doc.text('Total', W - M - 50, y)
   doc.text(fmt(factura.total), W - M, y, { align: 'right' })
 
-  if (factura.notas) {
+  if (factura.notas || notasDefault) {
     y += 14
+    const notasTexto = factura.notas || notasDefault
     doc.setFontSize(7.5)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(150, 150, 150)
-    doc.text(doc.splitTextToSize(factura.notas, W - M * 2), M + 5, y)
+    doc.text(doc.splitTextToSize(notasTexto, W - M * 2), M + 5, y)
+    y += 12
+  } else { y += 14 }
+
+  if (formaPago) {
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text('FORMA DE PAGO', M + 5, y); y += 5
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(120, 120, 120)
+    doc.text(doc.splitTextToSize(formaPago, W - M * 2), M + 5, y)
+    y += 12
+  }
+
+  if (textoPie) {
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text(textoPie, W / 2, y, { align: 'center' })
   }
 }

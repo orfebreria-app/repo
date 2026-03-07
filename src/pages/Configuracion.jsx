@@ -10,6 +10,9 @@ const empty = {
   factura_config: {
     plantilla: 'moderna',
     colorId: 'azul',
+    textoPie: '',
+    formaPago: '',
+    notas: '',
   },
   presupuesto_config: {
     plantilla: 'moderna',
@@ -199,8 +202,9 @@ export default function Configuracion({ session }) {
       <div className="card space-y-5">
         <div>
           <h2 className="font-bold text-white">🧾 Plantilla de factura</h2>
-          <p className="text-xs text-gray-500 mt-1">Estilo y color por defecto al descargar facturas en PDF.</p>
+          <p className="text-xs text-gray-500 mt-1">Personaliza el aspecto y los textos que aparecerán en tus facturas PDF.</p>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className="label">Estilo de plantilla</label>
@@ -224,7 +228,28 @@ export default function Configuracion({ session }) {
               ))}
             </div>
           </div>
+          <div>
+            <label className="label">Texto de pie de página</label>
+            <input className="input" placeholder="Ej: Gracias por su confianza en Trofeos AKA"
+              value={form.factura_config?.textoPie||''}
+              onChange={e => setForm({...form, factura_config:{...(form.factura_config||{}), textoPie:e.target.value}})} />
+          </div>
+          <div>
+            <label className="label">Forma de pago por defecto</label>
+            <input className="input" placeholder="Ej: Transferencia bancaria. IBAN: ES00 0000 0000 00"
+              value={form.factura_config?.formaPago||''}
+              onChange={e => setForm({...form, factura_config:{...(form.factura_config||{}), formaPago:e.target.value}})} />
+            <p className="text-xs text-gray-600 mt-1">Aparecerá al pie de todas las facturas PDF</p>
+          </div>
+          <div className="md:col-span-2">
+            <label className="label">Notas / condiciones por defecto</label>
+            <textarea className="input h-20 resize-none text-sm"
+              placeholder="Ej: El pago deberá realizarse en un plazo de 30 días desde la fecha de emisión..."
+              value={form.factura_config?.notas||''}
+              onChange={e => setForm({...form, factura_config:{...(form.factura_config||{}), notas:e.target.value}})} />
+          </div>
         </div>
+
         {/* Preview */}
         <div className="bg-gray-800/30 border border-gray-700 rounded-xl p-4">
           <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-3">Vista previa</div>
@@ -234,6 +259,8 @@ export default function Configuracion({ session }) {
             <div>
               <div className="font-bold text-white">{PLANTILLAS.find(p=>p.id===(form.factura_config?.plantilla||'moderna'))?.nombre}</div>
               <div className="text-xs text-gray-400 mt-0.5">{COLORES.find(c=>c.id===(form.factura_config?.colorId||'azul'))?.nombre} · {form.serie||'FAC'}-0001</div>
+              {form.factura_config?.formaPago && <div className="text-xs text-gray-600 mt-1 italic">{form.factura_config.formaPago}</div>}
+              {form.factura_config?.textoPie && <div className="text-xs text-gray-600 italic">{form.factura_config.textoPie}</div>}
             </div>
           </div>
         </div>
