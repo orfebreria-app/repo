@@ -245,26 +245,28 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   const [r, g, b] = color.rgb
   let y = M
 
-  // Logo
+  // Logo — calculamos su altura real para bajar la línea
+  let logoH = 0
   if (logoData) {
-    const { w: lw, h: lh } = logoSize(logoData, 25, 35)
+    const { w: lw, h: lh } = logoSize(logoData, 30, 40)
     try { doc.addImage(logoData.data, 'PNG', M, y, lw, lh) } catch(e) {}
+    logoH = lh
   }
 
-  // Nombre empresa
+  // Nombre empresa (a la derecha del logo)
+  const exOff = logoData ? M + 35 : M
   doc.setFontSize(18)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(r, g, b)
-  const exOff = logoData ? M + 28 : M
   doc.text(empresa?.nombre || 'Mi Empresa', exOff, y + 10)
 
   doc.setFontSize(8)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(80, 80, 80)
-  let infoY = y + 16
+  let infoY = y + 17
   if (empresa?.nif_cif)   { doc.text(`NIF/CIF: ${empresa.nif_cif}`, exOff, infoY); infoY += 5 }
   if (empresa?.direccion) { doc.text(empresa.direccion, exOff, infoY); infoY += 5 }
-  if (empresa?.email)     { doc.text(empresa.email, exOff, infoY) }
+  if (empresa?.email)     { doc.text(empresa.email, exOff, infoY); infoY += 5 }
 
   // FACTURA título (derecha)
   doc.setFontSize(24)
@@ -273,32 +275,30 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   doc.text('FACTURA', W - M, y + 10, { align: 'right' })
   doc.setFontSize(10)
   doc.setTextColor(r, g, b)
-  doc.text(factura.folio, W - M, y + 18, { align: 'right' })
+  doc.text(factura.folio, W - M, y + 20, { align: 'right' })
 
-  // Línea separadora
-  y = 45
+  // Línea separadora — respeta la altura del logo + margen
+  const lineY = Math.max(logoH + M + 8, infoY + 4, 48)
   doc.setDrawColor(r, g, b)
   doc.setLineWidth(0.8)
-  doc.line(M, y, W - M, y)
-  y += 8
+  doc.line(M, lineY, W - M, lineY)
+  y = lineY + 10
 
   // Info factura y cliente en 2 columnas
   const col2 = W / 2 + 5
   doc.setFontSize(8)
 
-  // Columna izq: datos factura
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(r, g, b)
   doc.text('DETALLES DE FACTURA', M, y)
-  y += 5
+  let detY = y + 5
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(50, 50, 50)
-  doc.text(`Número: ${factura.folio}`, M, y);         y += 5
-  doc.text(`Fecha: ${fmtFecha(factura.fecha_emision)}`, M, y); y += 5
-  doc.text(`Vencimiento: ${fmtFecha(factura.fecha_vencimiento)}`, M, y)
+  doc.text(`Número: ${factura.folio}`, M, detY);                        detY += 5
+  doc.text(`Fecha: ${fmtFecha(factura.fecha_emision)}`, M, detY);       detY += 5
+  doc.text(`Vencimiento: ${fmtFecha(factura.fecha_vencimiento)}`, M, detY)
 
-  // Columna der: cliente
-  let cy = 53
+  let cy = y
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(r, g, b)
   doc.text('FACTURAR A', col2, cy); cy += 5
@@ -307,9 +307,9 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   const cliente = factura.clientes
   if (cliente?.nombre)   { doc.text(cliente.nombre, col2, cy); cy += 5 }
   if (cliente?.nif_cif)  { doc.text(`NIF/CIF: ${cliente.nif_cif}`, col2, cy); cy += 5 }
-  if (cliente?.email)    { doc.text(cliente.email, col2, cy) }
+  if (cliente?.email)    { doc.text(cliente.email, col2, cy); cy += 5 }
 
-  y = Math.max(y, cy) + 10
+  y = Math.max(detY, cy) + 10
 
   // Línea fina
   doc.setDrawColor(200, 200, 200)
@@ -356,38 +356,46 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   doc.text('IVA:', totX, y)
   doc.text(fmt(factura.iva_total), W - M, y, { align: 'right' }); y += 2
   doc.setDrawColor(r, g, b)
-  doc.line(totX, y + 2, W - M, y + 2); y += 6
+  doc.line(totX, y + 2, W - M, y + 2); y += 8
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.setTextColor(r, g, b)
   doc.text('TOTAL:', totX, y)
   doc.text(fmt(factura.total), W - M, y, { align: 'right' })
 
+  // ── Sección inferior con más espacio ──────────────────
+  y += 20
+
   if (factura.notas || notasDefault) {
-    y += 14
     const notasTexto = factura.notas || notasDefault
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
     doc.setTextColor(r, g, b)
-    doc.text('NOTAS / CONDICIONES', M, y); y += 5
+    doc.text('NOTAS / CONDICIONES', M, y); y += 6
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(80, 80, 80)
     const notasLines = doc.splitTextToSize(notasTexto, W - M * 2)
     doc.text(notasLines, M, y)
-    y += notasLines.length * 4 + 6
-  } else { y += 14 }
+    y += notasLines.length * 5 + 14
+  }
 
   if (formaPago) {
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
-    doc.text('FORMA DE PAGO', M, y); y += 5
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(80, 80, 80)
-    doc.text(doc.splitTextToSize(formaPago, W - M * 2), M, y)
-    y += 12
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text('FORMA DE PAGO', M, y); y += 6
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(80, 80, 80)
+    const pagoLines = doc.splitTextToSize(formaPago, W - M * 2)
+    doc.text(pagoLines, M, y)
+    y += pagoLines.length * 5 + 14
   }
 
   if (textoPie) {
-    doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
-    doc.text(textoPie, W / 2, y, { align: 'center' })
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'bold')
+    doc.setTextColor(r, g, b)
+    doc.text(textoPie, W / 2, y + 4, { align: 'center' })
   }
 }
 
