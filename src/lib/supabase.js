@@ -128,3 +128,148 @@ export const formatFecha = (d) => {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
+
+// ── Proveedores ───────────────────────────────────────
+export const getProveedores = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('proveedores')
+    .select('*')
+    .eq('empresa_id', empresaId)
+    .eq('activo', true)
+    .order('nombre')
+  return { data: data || [], error }
+}
+
+export const upsertProveedor = async (prov) => {
+  const { data, error } = await supabase
+    .from('proveedores')
+    .upsert(prov)
+    .select()
+    .single()
+  return { data, error }
+}
+
+export const deleteProveedor = async (id) => {
+  const { error } = await supabase.from('proveedores').update({ activo: false }).eq('id', id)
+  return { error }
+}
+
+// ── Productos ─────────────────────────────────────────
+export const getProductos = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('*, proveedores(nombre)')
+    .eq('empresa_id', empresaId)
+    .eq('activo', true)
+    .order('nombre')
+  return { data: data || [], error }
+}
+
+export const upsertProducto = async (prod) => {
+  const { data, error } = await supabase
+    .from('productos')
+    .upsert(prod)
+    .select()
+    .single()
+  return { data, error }
+}
+
+export const deleteProducto = async (id) => {
+  const { error } = await supabase.from('productos').update({ activo: false }).eq('id', id)
+  return { error }
+}
+
+// ── Movimientos de stock ──────────────────────────────
+export const getMovimientos = async (empresaId, productoId = null) => {
+  let q = supabase
+    .from('movimientos_stock')
+    .select('*, productos(nombre, referencia)')
+    .eq('empresa_id', empresaId)
+    .order('creado_en', { ascending: false })
+    .limit(200)
+  if (productoId) q = q.eq('producto_id', productoId)
+  const { data, error } = await q
+  return { data: data || [], error }
+}
+
+// Descuenta stock de una lista de líneas y registra movimientos
+export const descontarStockVenta = async (empresaId, lineas, referenciaId, referenciaTipo) => {
+  const lineasConProducto = lineas.filter(l => l.producto_id)
+  if (!lineasConProducto.length) return { error: null }
+
+  for (const linea of lineasConProducto) {
+    // Obtener stock actual
+    const { data: prod } = await supabase
+      .from('productos')
+      .select('stock_actual')
+      .eq('id', linea.producto_id)
+      .single()
+
+    if (!prod) continue
+    const anterior = Number(prod.stock_actual)
+    const cantidad = Number(linea.cantidad)
+    const posterior = anterior - cantidad
+
+    // Actualizar stock
+    await supabase
+      .from('productos')
+      .update({ stock_actual: posterior })
+      .eq('id', linea.producto_id)
+
+    // Registrar movimiento
+    await supabase.from('movimientos_stock').insert({
+      empresa_id:      empresaId,
+      producto_id:     linea.producto_id,
+      tipo:            referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
+      cantidad:        -cantidad,
+      stock_anterior:  anterior,
+      stock_posterior: posterior,
+      referencia_id:   referenciaId,
+      referencia_tipo: referenciaTipo,
+    })
+  }
+  return { error: null }
+}
+
+export const entradaStock = async (empresaId, productoId, cantidad, notas = '') => {
+  const { data: prod } = await supabase
+    .from('productos')
+    .select('stock_actual')
+    .eq('id', productoId)
+    .single()
+  if (!prod) return { error: 'Producto no encontrado' }
+
+  const anterior = Number(prod.stock_actual)
+  const posterior = anterior + Number(cantidad)
+
+  await supabase.from('productos').update({ stock_actual: posterior }).eq('id', productoId)
+  await supabase.from('movimientos_stock').insert({
+    empresa_id: empresaId, producto_id: productoId,
+    tipo: 'entrada', cantidad: Number(cantidad),
+    stock_anterior: anterior, stock_posterior: posterior,
+    referencia_tipo: 'manual', notas,
+  })
+  return { error: null }
+}
+
+export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '') => {
+  const { data: prod } = await supabase
+    .from('productos')
+    .select('stock_actual')
+    .eq('id', productoId)
+    .single()
+  if (!prod) return { error: 'Producto no encontrado' }
+
+  const anterior = Number(prod.stock_actual)
+  const diff = Number(nuevoStock) - anterior
+
+  await supabase.from('productos').update({ stock_actual: Number(nuevoStock) }).eq('id', productoId)
+  await supabase.from('movimientos_stock').insert({
+    empresa_id: empresaId, producto_id: productoId,
+    tipo: diff >= 0 ? 'ajuste_positivo' : 'ajuste_negativo',
+    cantidad: diff,
+    stock_anterior: anterior, stock_posterior: Number(nuevoStock),
+    referencia_tipo: 'manual', notas: notas || 'Ajuste manual',
+  })
+  return { error: null }
+}

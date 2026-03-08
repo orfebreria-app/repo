@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { supabase, getEmpresa, formatEuro } from '../lib/supabase'
+import { supabase, getEmpresa, getProductos, descontarStockVenta, formatEuro } from '../lib/supabase'
 import { generarTicketPDF } from '../lib/ticketPDF'
 
 const IVA_OPCIONES = [0, 4, 10, 21]
@@ -23,6 +23,7 @@ const lineaVacia = () => ({
   cantidad: 1,
   precio_con_iva: '',
   iva_tasa: 21,
+  producto_id: null,
 })
 
 // Precio introducido ya incluye IVA
@@ -48,13 +49,20 @@ export default function Tickets({ session }) {
   const [claveBorrar, setClaveBorrar] = useState('')
   const [errorClave,  setErrorClave]  = useState('')
   const [seleccionados, setSeleccionados] = useState(new Set())
+  const [productos, setProductos] = useState([])
+  const [busqProducto, setBusqProducto] = useState('')
+  const [lineaActivaBusq, setLineaActivaBusq] = useState(null)
   const descRef = useRef(null)
 
   useEffect(() => {
     const init = async () => {
       const { data: emp } = await getEmpresa(session.user.id)
       setEmpresa(emp)
-      if (emp) cargarHistorial(emp.id)
+      if (emp) {
+        cargarHistorial(emp.id)
+        const { data: prods } = await getProductos(emp.id)
+        setProductos(prods || [])
+      }
     }
     init()
   }, [session])
@@ -67,6 +75,23 @@ export default function Tickets({ session }) {
       .order('creado_en', { ascending: false })
       .limit(50)
     setHistorial(data || [])
+  }
+
+  // Buscar productos del catálogo
+  const productosFiltrados = busqProducto.length > 1
+    ? productos.filter(p => p.nombre.toLowerCase().includes(busqProducto.toLowerCase()) || (p.referencia||'').toLowerCase().includes(busqProducto.toLowerCase()))
+    : []
+
+  const seleccionarProducto = (prod, lineaId) => {
+    setLineas(l => l.map(x => x._id === lineaId ? {
+      ...x,
+      descripcion: prod.nombre,
+      precio_con_iva: prod.precio_venta || '',
+      iva_tasa: prod.iva_tasa || 21,
+      producto_id: prod.id,
+    } : x))
+    setBusqProducto('')
+    setLineaActivaBusq(null)
   }
 
   const totalGeneral = lineas.reduce((s, l) => s + calcLinea(l).totalLinea, 0)
@@ -119,9 +144,13 @@ export default function Tickets({ session }) {
           iva_tasa:        Number(l.iva_tasa),
           subtotal:        totalLinea,
           orden:           i,
+          producto_id:     l.producto_id || null,
         }
       })
     )
+
+    // Descontar stock automáticamente
+    await descontarStockVenta(empresa.id, lineas, ticket.id, 'ticket')
 
     await supabase.from('empresas').update({ siguiente_ticket: numero + 1 }).eq('id', empresa.id)
     setEmpresa(e => ({ ...e, siguiente_ticket: numero + 1 }))
@@ -270,17 +299,64 @@ export default function Tickets({ session }) {
 
               {lineas.map((l, idx) => {
                 const { totalLinea } = calcLinea(l)
+                const busqActiva = lineaActivaBusq === l._id && busqProducto.length > 1
                 return (
                   <div key={l._id} className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-12 md:col-span-5">
+                    <div className="col-span-12 md:col-span-5 relative">
                       <input
                         ref={idx === lineas.length - 1 ? descRef : null}
                         className="input text-sm"
-                        placeholder="Ej: Trofeo grabado personalizado"
-                        value={l.descripcion}
-                        onChange={e => updateLinea(l._id, 'descripcion', e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && addLinea()}
+                        placeholder="Ej: Trofeo grabado o busca catálogo..."
+                        value={lineaActivaBusq === l._id ? busqProducto : l.descripcion}
+                        onChange={e => {
+                          if (lineaActivaBusq === l._id) {
+                            setBusqProducto(e.target.value)
+                          } else {
+                            updateLinea(l._id, 'descripcion', e.target.value)
+                            if (e.target.value.length > 1) {
+                              setLineaActivaBusq(l._id)
+                              setBusqProducto(e.target.value)
+                            }
+                          }
+                        }}
+                        onFocus={() => {
+                          if (l.producto_id || l.descripcion.length > 1) {
+                            setLineaActivaBusq(l._id)
+                            setBusqProducto(l.descripcion)
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setLineaActivaBusq(null), 200)}
+                        onKeyDown={e => e.key === 'Enter' && !busqActiva && addLinea()}
                       />
+                      {/* Dropdown catálogo */}
+                      {busqActiva && productosFiltrados.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 z-40 rounded-lg shadow-xl mt-1 overflow-hidden"
+                          style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+                          {productosFiltrados.slice(0, 6).map(p => (
+                            <button key={p.id}
+                              onMouseDown={() => seleccionarProducto(p, l._id)}
+                              className="w-full text-left px-3 py-2 hover:bg-white/5 flex justify-between items-center gap-2">
+                              <div>
+                                <div className="text-sm text-white font-medium">{p.nombre}</div>
+                                <div className="text-xs text-gray-500">{p.referencia || ''} {p.categoria ? `· ${p.categoria}` : ''}</div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-xs font-bold" style={{ color: '#C9A84C' }}>{formatEuro(p.precio_venta)}</div>
+                                <div className={`text-xs ${p.stock_actual <= 0 ? 'text-red-400' : p.stock_actual <= p.stock_minimo ? 'text-yellow-400' : 'text-green-400'}`}>
+                                  Stock: {p.stock_actual} {p.unidad}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {/* Badge producto vinculado */}
+                      {l.producto_id && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs px-1.5 py-0.5 rounded"
+                          style={{ background: 'rgba(201,168,76,0.15)', color: '#C9A84C' }}>
+                          📦
+                        </span>
+                      )}
                     </div>
                     <div className="col-span-4 md:col-span-2">
                       <input className="input text-right text-sm" type="number" min="0.001" step="0.001"

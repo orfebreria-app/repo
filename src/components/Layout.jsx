@@ -7,6 +7,7 @@ const NAV = [
   { to: '/facturas',      icon: '🧾', label: 'Facturas' },
   { to: '/presupuestos',  icon: '📋', label: 'Presupuestos' },
   { to: '/tickets',       icon: '🏪', label: 'Caja / Tickets' },
+  { to: '/stock',         icon: '📦', label: 'Stock' },
   { to: '/clientes',      icon: '👥', label: 'Clientes' },
   { to: '/configuracion', icon: '⚙️', label: 'Configuración' },
 ]
