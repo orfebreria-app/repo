@@ -273,3 +273,72 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
   })
   return { error: null }
 }
+
+// ── Facturas de proveedor (Compras) ───────────────────
+export const getFacturasProveedor = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('facturas_proveedor')
+    .select('*, proveedores(nombre)')
+    .eq('empresa_id', empresaId)
+    .order('fecha_factura', { ascending: false })
+  return { data: data || [], error }
+}
+
+export const getFacturaProveedor = async (id) => {
+  const { data, error } = await supabase
+    .from('facturas_proveedor')
+    .select('*, proveedores(*), lineas_factura_proveedor(*)')
+    .eq('id', id)
+    .single()
+  return { data, error }
+}
+
+export const createFacturaProveedor = async (factura, lineas) => {
+  const { data: fp, error: errFp } = await supabase
+    .from('facturas_proveedor')
+    .insert(factura)
+    .select()
+    .single()
+  if (errFp) return { data: null, error: errFp }
+
+  const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
+  const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
+  if (errL) return { data: null, error: errL }
+
+  // Sumar stock de productos vinculados
+  for (const linea of lineas.filter(l => l.producto_id)) {
+    const { data: prod } = await supabase
+      .from('productos')
+      .select('stock_actual')
+      .eq('id', linea.producto_id)
+      .single()
+    if (!prod) continue
+    const anterior  = Number(prod.stock_actual)
+    const posterior = anterior + Number(linea.cantidad)
+    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', linea.producto_id)
+    await supabase.from('movimientos_stock').insert({
+      empresa_id: factura.empresa_id, producto_id: linea.producto_id,
+      tipo: 'entrada', cantidad: Number(linea.cantidad),
+      stock_anterior: anterior, stock_posterior: posterior,
+      referencia_id: fp.id, referencia_tipo: 'compra',
+      notas: `Factura proveedor ${factura.numero || fp.id.slice(0,8)}`,
+    })
+  }
+
+  return { data: fp, error: null }
+}
+
+export const updateEstadoFacturaProveedor = async (id, estado) => {
+  const { data, error } = await supabase
+    .from('facturas_proveedor')
+    .update({ estado })
+    .eq('id', id)
+    .select()
+    .single()
+  return { data, error }
+}
+
+export const deleteFacturaProveedor = async (id) => {
+  const { error } = await supabase.from('facturas_proveedor').delete().eq('id', id)
+  return { error }
+}
