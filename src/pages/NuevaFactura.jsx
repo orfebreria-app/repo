@@ -30,6 +30,7 @@ export default function NuevaFactura({ session }) {
   const [busqProducto,    setBusqProducto]    = useState('')
   const [lineaActivaBusq, setLineaActivaBusq] = useState(null)
   const [clienteRE, setClienteRE] = useState(false)
+  const [folioEditado, setFolioEditado] = useState('')
 
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -100,7 +101,8 @@ export default function NuevaFactura({ session }) {
       return setError('Completa todos los conceptos')
 
     setSaving(true)
-    const folio = `${empresa.serie}-${String(empresa.siguiente_folio).padStart(4, '0')}`
+    const folioAuto = `${empresa.serie}-${String(empresa.siguiente_folio).padStart(4, '0')}`
+    const folio = folioEditado.trim() || folioAuto
     const facturaData = {
       empresa_id: empresa.id, cliente_id: form.cliente_id,
       folio, fecha_emision: form.fecha_emision,
@@ -196,10 +198,16 @@ export default function NuevaFactura({ session }) {
           </select>
         </div>
         <div>
-          <label className="label">Folio (automático)</label>
-          <div className="input bg-gray-800/50 text-gray-500 select-none font-mono text-xs">
-            {empresa.serie}-{String(empresa.siguiente_folio).padStart(4,'0')}
-          </div>
+          <label className="label">
+            Nº Factura
+            <span className="text-gray-600 font-normal ml-1 text-xs">(editable)</span>
+          </label>
+          <input
+            className="input font-mono"
+            value={folioEditado || `${empresa.serie}-${String(empresa.siguiente_folio).padStart(4,'0')}`}
+            onChange={e => setFolioEditado(e.target.value)}
+            placeholder={`${empresa.serie}-${String(empresa.siguiente_folio).padStart(4,'0')}`}
+          />
         </div>
       </div>
 
