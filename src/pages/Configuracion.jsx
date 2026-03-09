@@ -7,6 +7,7 @@ const empty = {
   direccion: '', ciudad: '', cp: '', pais: 'España',
   moneda: 'EUR', serie: 'FAC', iva_default: 21,
   serie_presupuesto: 'PRE',
+  recargo_equivalencia: false,
   factura_config: {
     plantilla: 'moderna',
     colorId: 'azul',
@@ -194,6 +195,37 @@ export default function Configuracion({ session }) {
               <option value="10">10% (Reducido)</option>
               <option value="21">21% (General)</option>
             </select>
+          </div>
+          <div className="md:col-span-2">
+            <label className="label">Recargo de equivalencia</label>
+            <div className="flex items-start gap-4 mt-1">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className="relative">
+                  <input type="checkbox" className="sr-only"
+                    checked={!!form.recargo_equivalencia}
+                    onChange={e => setForm({...form, recargo_equivalencia: e.target.checked})} />
+                  <div className={`w-12 h-6 rounded-full transition-all ${form.recargo_equivalencia ? '' : 'bg-gray-700'}`}
+                    style={form.recargo_equivalencia ? { background: 'linear-gradient(135deg,#C9A84C,#a8882e)' } : {}}>
+                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${form.recargo_equivalencia ? 'translate-x-6' : ''}`} />
+                  </div>
+                </div>
+                <span className={`text-sm font-medium ${form.recargo_equivalencia ? 'text-white' : 'text-gray-500'}`}>
+                  {form.recargo_equivalencia ? 'Activado' : 'Desactivado'}
+                </span>
+              </label>
+              {form.recargo_equivalencia && (
+                <div className="flex gap-2 flex-wrap text-xs">
+                  {[{iva:21,re:5.2},{iva:10,re:1.4},{iva:4,re:0.5}].map(({iva,re}) => (
+                    <span key={iva} className="px-2 py-1 rounded-lg border" style={{ background:'rgba(201,168,76,0.1)', borderColor:'rgba(201,168,76,0.3)', color:'#C9A84C' }}>
+                      IVA {iva}% + RE {re}%
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-gray-600 mt-2">
+              Régimen especial para minoristas. Se aplica sobre la base imponible además del IVA (21%→5,2% · 10%→1,4% · 4%→0,5%).
+            </p>
           </div>
         </div>
       </div>

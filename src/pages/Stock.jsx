@@ -276,7 +276,7 @@ export default function Stock({ session }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid #2a2418' }}>
-                  {['Fecha', 'Proveedor', 'Nº Factura', 'Total', 'Estado', 'Acciones'].map(h => (
+                  {['Fecha', 'Proveedor', 'Nº Factura', 'Base', 'IVA', 'R.Equiv.', 'Total', 'Estado', 'Acciones'].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wide font-semibold">{h}</th>
                   ))}
                 </tr>
@@ -295,8 +295,14 @@ export default function Stock({ session }) {
                   return (
                     <tr key={c.id} className="border-t hover:bg-white/5 transition-colors" style={{ borderColor: '#1e1c18' }}>
                       <td className="px-4 py-3 text-gray-400 text-xs">{formatFecha(c.fecha_factura)}</td>
-                      <td className="px-4 py-3 font-medium text-white">{c.proveedores?.nombre || <span className="text-gray-600">Sin proveedor</span>}</td>
+                      <td className="px-4 py-3 font-medium text-white">
+                        {c.proveedores?.nombre || c.clientes?.nombre || <span className="text-gray-600">Sin emisor</span>}
+                        {c.clientes?.nombre && <span className="ml-1 text-xs text-gray-500">(cliente)</span>}
+                      </td>
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.numero || '—'}</td>
+                      <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.subtotal)}</td>
+                      <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.iva_total)}</td>
+                      <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: '#C9A84C' }}>{formatEuro(c.recargo_total || 0)}</td>
                       <td className="px-4 py-3 font-bold text-white font-mono">{formatEuro(c.total)}</td>
                       <td className="px-4 py-3">
                         <select
@@ -714,6 +720,475 @@ function Modal({ title, onClose, children }) {
 // ── Modal Compra / Factura Proveedor ───────────────────
 function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
   const lineaVacia = () => ({ _id: Math.random().toString(36).slice(2), descripcion: '', cantidad: 1, precio_unitario: '', iva_tasa: 21, producto_id: null })
+  const [clientes, setClientes] = useState([])
+  const [tipoEmisor, setTipoEmisor] = useState('proveedor') // 'proveedor' | 'cliente'
+  const [form, setForm] = useState({
+    proveedor_id: '', cliente_id: '', numero: '',
+    fecha_factura: new Date().toISOString().slice(0,10),
+    fecha_vencimiento: '', estado: 'pendiente', notas: '',
+  })
+  const [lineas, setLineas] = useState([lineaVacia()])
+  const [saving, setSaving] = useState(false)
+  const [busq, setBusq]     = useState('')
+  const [lineaActiva, setLineaActiva] = useState(null)
+
+  useEffect(() => {
+    const { supabase } = require ? null : null
+    // Cargamos clientes via supabase directamente
+    import('../lib/supabase').then(({ getClientes }) => {
+      getClientes(empresaId).then(({ data }) => setClientes(data || []))
+    })
+  }, [empresaId])
+
+  const calcLinea = (l) => +(Number(l.cantidad) * Number(l.precio_unitario || 0)).toFixed(2)
+  const subtotal  = lineas.reduce((s, l) => s + calcLinea(l), 0)
+  const ivaTotal  = lineas.reduce((s, l) => s + +(calcLinea(l) * Number(l.iva_tasa) / 100).toFixed(2), 0)
+  const total     = +(subtotal + ivaTotal).toFixed(2)
+
+  const addLinea    = () => setLineas(l => [...l, lineaVacia()])
+  const removeLinea = (id) => lineas.length > 1 && setLineas(l => l.filter(x => x._id !== id))
+  const updateLinea = (id, field, val) => setLineas(l => l.map(x => x._id === id ? { ...x, [field]: val } : x))
+
+  const prodsFiltrados = busq.length > 1
+    ? productos.filter(p => p.nombre.toLowerCase().includes(busq.toLowerCase()) || (p.referencia||'').toLowerCase().includes(busq.toLowerCase()))
+    : []
+
+  const seleccionar = (prod, lineaId) => {
+    setLineas(l => l.map(x => x._id === lineaId ? {
+      ...x, descripcion: prod.nombre,
+      precio_unitario: prod.precio_compra || prod.precio_venta || '',
+      iva_tasa: prod.iva_tasa || 21, producto_id: prod.id,
+    } : x))
+    setBusq(''); setLineaActiva(null)
+  }
+
+  const handleSave = async () => {
+    if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return alert('Completa todos los conceptos')
+    setSaving(true)
+    const facturaData = {
+      empresa_id: empresaId,
+      proveedor_id: tipoEmisor === 'proveedor' ? (form.proveedor_id || null) : null,
+      cliente_id:   tipoEmisor === 'cliente'   ? (form.cliente_id   || null) : null,
+      numero: form.numero || null,
+      fecha_factura: form.fecha_factura,
+      fecha_vencimiento: form.fecha_vencimiento || null,
+      estado: form.estado,
+      subtotal, iva_total: ivaTotal, total,
+      notas: form.notas || null,
+    }
+    const lineasData = lineas.map((l, i) => ({
+      descripcion: l.descripcion, cantidad: Number(l.cantidad),
+      precio_unitario: Number(l.precio_unitario), iva_tasa: Number(l.iva_tasa),
+      subtotal: calcLinea(l), producto_id: l.producto_id || null, orden: i,
+    }))
+    const { error } = await createFacturaProveedor(facturaData, lineasData)
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    onSaved()
+  }
+
+  return (
+    <Modal title="🧾 Nueva factura de compra" onClose={onClose}>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        {/* Tipo de emisor */}
+        <div className="md:col-span-2">
+          <label className="label">Emisor de la factura</label>
+          <div className="flex gap-2">
+            <button type="button"
+              onClick={() => setTipoEmisor('proveedor')}
+              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-all ${tipoEmisor === 'proveedor' ? 'text-black border-transparent' : 'text-gray-400 border-gray-700 hover:border-gray-500'}`}
+              style={tipoEmisor === 'proveedor' ? { background: 'linear-gradient(135deg,#C9A84C,#a8882e)' } : {}}>
+              🏭 Proveedor
+            </button>
+            <button type="button"
+              onClick={() => setTipoEmisor('cliente')}
+              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-all ${tipoEmisor === 'cliente' ? 'text-black border-transparent' : 'text-gray-400 border-gray-700 hover:border-gray-500'}`}
+              style={tipoEmisor === 'cliente' ? { background: 'linear-gradient(135deg,#C9A84C,#a8882e)' } : {}}>
+              👥 Cliente
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 mt-1">
+            {tipoEmisor === 'cliente' ? 'Algunos clientes también actúan como proveedores' : 'Proveedor habitual de mercancía'}
+          </p>
+        </div>
+
+        {/* Selector según tipo */}
+        <div>
+          <label className="label">{tipoEmisor === 'proveedor' ? 'Proveedor' : 'Cliente'}</label>
+          {tipoEmisor === 'proveedor' ? (
+            <select className="input" value={form.proveedor_id} onChange={e => setForm(f => ({...f, proveedor_id: e.target.value}))}>
+              <option value="">Sin proveedor</option>
+              {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          ) : (
+            <select className="input" value={form.cliente_id} onChange={e => setForm(f => ({...f, cliente_id: e.target.value}))}>
+              <option value="">Sin cliente</option>
+              {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+          )}
+        </div>
+
+        <div>
+          <label className="label">Nº factura del emisor</label>
+          <input className="input font-mono" placeholder="Ej: A-2026-001"
+            value={form.numero} onChange={e => setForm(f => ({...f, numero: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Fecha factura</label>
+          <input type="date" className="input" value={form.fecha_factura}
+            onChange={e => setForm(f => ({...f, fecha_factura: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Fecha vencimiento</label>
+          <input type="date" className="input" value={form.fecha_vencimiento}
+            onChange={e => setForm(f => ({...f, fecha_vencimiento: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Estado</label>
+          <select className="input" value={form.estado} onChange={e => setForm(f => ({...f, estado: e.target.value}))}>
+            <option value="pendiente">Pendiente</option>
+            <option value="pagada">Pagada</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Notas</label>
+          <input className="input" placeholder="Notas opcionales..."
+            value={form.notas} onChange={e => setForm(f => ({...f, notas: e.target.value}))} />
+        </div>
+      </div>
+
+      {/* Líneas */}
+      <div className="space-y-2 pt-2">
+        <div className="flex items-center justify-between">
+          <label className="label mb-0">Conceptos / Productos</label>
+          <button type="button" onClick={addLinea} className="text-xs font-semibold" style={{ color: '#C9A84C' }}>+ Añadir línea</button>
+        </div>
+        <div className="hidden md:grid grid-cols-12 gap-2 text-xs text-gray-500 uppercase tracking-wide pb-1" style={{ borderBottom: '1px solid #2a2418' }}>
+          <div className="col-span-5">Descripción</div>
+          <div className="col-span-2 text-right">Cant.</div>
+          <div className="col-span-2 text-right">Precio unit.</div>
+          <div className="col-span-1 text-right">IVA</div>
+          <div className="col-span-1 text-right">Total</div>
+          <div className="col-span-1"/>
+        </div>
+        {lineas.map((l) => {
+          const busqActiva = lineaActiva === l._id && busq.length > 1
+          return (
+            <div key={l._id} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-12 md:col-span-5 relative">
+                <input className="input text-sm"
+                  placeholder="Descripción o busca producto..."
+                  value={lineaActiva === l._id ? busq : l.descripcion}
+                  onChange={e => {
+                    if (lineaActiva === l._id) { setBusq(e.target.value) }
+                    else { updateLinea(l._id, 'descripcion', e.target.value); if (e.target.value.length > 1) { setLineaActiva(l._id); setBusq(e.target.value) } }
+                  }}
+                  onFocus={() => { if (l.descripcion.length > 1) { setLineaActiva(l._id); setBusq(l.descripcion) } }}
+                  onBlur={() => setTimeout(() => setLineaActiva(null), 200)}
+                />
+                {busqActiva && prodsFiltrados.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 rounded-lg shadow-xl mt-1 overflow-hidden"
+                    style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+                    {prodsFiltrados.slice(0, 5).map(p => (
+                      <button key={p.id} type="button" onMouseDown={() => seleccionar(p, l._id)}
+                        className="w-full text-left px-3 py-2 hover:bg-white/5 flex justify-between items-center">
+                        <div>
+                          <div className="text-sm text-white">{p.nombre}</div>
+                          <div className="text-xs text-gray-500">{p.referencia || ''}</div>
+                        </div>
+                        <div className="text-xs text-gray-400">Compra: {formatEuro(p.precio_compra)}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {l.producto_id && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: '#C9A84C' }}>📦</span>}
+              </div>
+              <div className="col-span-3 md:col-span-2">
+                <input className="input text-right text-sm" type="number" min="0.001" step="0.001"
+                  value={l.cantidad} onChange={e => updateLinea(l._id, 'cantidad', e.target.value)} />
+              </div>
+              <div className="col-span-3 md:col-span-2">
+                <input className="input text-right text-sm" type="number" min="0" step="0.01" placeholder="0.00"
+                  value={l.precio_unitario} onChange={e => updateLinea(l._id, 'precio_unitario', e.target.value)} />
+              </div>
+              <div className="col-span-2 md:col-span-1">
+                <select className="input text-xs px-1" value={l.iva_tasa} onChange={e => updateLinea(l._id, 'iva_tasa', e.target.value)}>
+                  {[0,4,10,21].map(v => <option key={v} value={v}>{v}%</option>)}
+                </select>
+              </div>
+              <div className="hidden md:flex col-span-1 justify-end text-sm font-semibold text-white">{formatEuro(calcLinea(l))}</div>
+              <div className="col-span-2 md:col-span-1 flex justify-center">
+                <button type="button" onClick={() => removeLinea(l._id)} disabled={lineas.length === 1}
+                  className="text-gray-600 hover:text-red-400 text-xl leading-none disabled:opacity-20">×</button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex justify-end gap-8 text-sm pt-2" style={{ borderTop: '1px solid #2a2418' }}>
+        <span className="text-gray-400">Subtotal: <strong className="text-white ml-1">{formatEuro(subtotal)}</strong></span>
+        <span className="text-gray-400">IVA: <strong className="text-white ml-1">{formatEuro(ivaTotal)}</strong></span>
+        <span className="text-gray-400">TOTAL: <strong className="text-lg ml-1" style={{ color: '#C9A84C' }}>{formatEuro(total)}</strong></span>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-2">
+        <button onClick={onClose} className="btn-secondary">Cancelar</button>
+        <button onClick={handleSave} disabled={saving} className="btn-primary">
+          {saving ? 'Guardando...' : '💾 Guardar compra'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+  // Tabla legal de recargo de equivalencia según tipo de IVA
+  const RECARGO = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
+
+  const lineaVacia = () => ({
+    _id: Math.random().toString(36).slice(2),
+    descripcion: '', cantidad: 1, precio_unitario: '',
+    iva_tasa: 21, recargo_tasa: 5.2, producto_id: null,
+  })
+
+  const [form, setForm] = useState({
+    proveedor_id: '', numero: '', fecha_factura: new Date().toISOString().slice(0,10),
+    fecha_vencimiento: '', estado: 'pendiente', notas: '',
+  })
+  const [lineas, setLineas]       = useState([lineaVacia()])
+  const [saving, setSaving]       = useState(false)
+  const [busq, setBusq]           = useState('')
+  const [lineaActiva, setLineaActiva] = useState(null)
+
+  const calcLinea = (l) => {
+    const base      = +(Number(l.cantidad) * Number(l.precio_unitario || 0)).toFixed(2)
+    const iva       = +(base * Number(l.iva_tasa) / 100).toFixed(2)
+    const recargo   = +(base * Number(l.recargo_tasa) / 100).toFixed(2)
+    const total     = +(base + iva + recargo).toFixed(2)
+    return { base, iva, recargo, total }
+  }
+
+  const subtotal      = lineas.reduce((s, l) => s + calcLinea(l).base, 0)
+  const ivaTotal      = lineas.reduce((s, l) => s + calcLinea(l).iva, 0)
+  const recargoTotal  = lineas.reduce((s, l) => s + calcLinea(l).recargo, 0)
+  const total         = +(subtotal + ivaTotal + recargoTotal).toFixed(2)
+
+  const addLinea    = () => setLineas(l => [...l, lineaVacia()])
+  const removeLinea = (id) => lineas.length > 1 && setLineas(l => l.filter(x => x._id !== id))
+  const updateLinea = (id, field, val) => setLineas(l => l.map(x => {
+    if (x._id !== id) return x
+    const updated = { ...x, [field]: val }
+    // Al cambiar IVA, actualizar recargo automáticamente
+    if (field === 'iva_tasa') updated.recargo_tasa = RECARGO[Number(val)] ?? 0
+    return updated
+  }))
+
+  const prodsFiltrados = busq.length > 1
+    ? productos.filter(p => p.nombre.toLowerCase().includes(busq.toLowerCase()) || (p.referencia||'').toLowerCase().includes(busq.toLowerCase()))
+    : []
+
+  const seleccionar = (prod, lineaId) => {
+    const ivaTasa = prod.iva_tasa || 21
+    setLineas(l => l.map(x => x._id === lineaId ? {
+      ...x, descripcion: prod.nombre,
+      precio_unitario: prod.precio_compra || prod.precio_venta || '',
+      iva_tasa: ivaTasa,
+      recargo_tasa: RECARGO[Number(ivaTasa)] ?? 0,
+      producto_id: prod.id,
+    } : x))
+    setBusq(''); setLineaActiva(null)
+  }
+
+  const handleSave = async () => {
+    if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return alert('Completa todos los conceptos')
+    setSaving(true)
+    const facturaData = {
+      empresa_id: empresaId,
+      proveedor_id: form.proveedor_id || null,
+      numero: form.numero || null,
+      fecha_factura: form.fecha_factura,
+      fecha_vencimiento: form.fecha_vencimiento || null,
+      estado: form.estado,
+      subtotal: +subtotal.toFixed(2),
+      iva_total: +ivaTotal.toFixed(2),
+      recargo_total: +recargoTotal.toFixed(2),
+      total,
+      notas: form.notas || null,
+    }
+    const lineasData = lineas.map((l, i) => {
+      const { base, iva, recargo } = calcLinea(l)
+      return {
+        descripcion: l.descripcion,
+        cantidad: Number(l.cantidad),
+        precio_unitario: Number(l.precio_unitario),
+        iva_tasa: Number(l.iva_tasa),
+        recargo_tasa: Number(l.recargo_tasa),
+        recargo_importe: recargo,
+        subtotal: base,
+        producto_id: l.producto_id || null,
+        orden: i,
+      }
+    })
+    const { error } = await createFacturaProveedor(facturaData, lineasData)
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    onSaved()
+  }
+
+  return (
+    <Modal title="🧾 Nueva factura de compra" onClose={onClose}>
+      {/* Aviso recargo */}
+      <div className="rounded-lg px-3 py-2 text-xs flex items-start gap-2"
+        style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)', color: '#C9A84C' }}>
+        <span className="text-base">⚖️</span>
+        <span>Régimen de <strong>Recargo de Equivalencia</strong> activo — se aplica automáticamente según el tipo de IVA de cada línea (21%→5,2% · 10%→1,4% · 4%→0,5%)</span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label className="label">Proveedor</label>
+          <select className="input" value={form.proveedor_id} onChange={e => setForm(f => ({...f, proveedor_id: e.target.value}))}>
+            <option value="">Sin proveedor</option>
+            {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Nº factura del proveedor</label>
+          <input className="input font-mono" placeholder="Ej: A-2026-001"
+            value={form.numero} onChange={e => setForm(f => ({...f, numero: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Fecha factura</label>
+          <input type="date" className="input" value={form.fecha_factura}
+            onChange={e => setForm(f => ({...f, fecha_factura: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Fecha vencimiento</label>
+          <input type="date" className="input" value={form.fecha_vencimiento}
+            onChange={e => setForm(f => ({...f, fecha_vencimiento: e.target.value}))} />
+        </div>
+        <div>
+          <label className="label">Estado</label>
+          <select className="input" value={form.estado} onChange={e => setForm(f => ({...f, estado: e.target.value}))}>
+            <option value="pendiente">Pendiente</option>
+            <option value="pagada">Pagada</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Notas</label>
+          <input className="input" placeholder="Notas opcionales..."
+            value={form.notas} onChange={e => setForm(f => ({...f, notas: e.target.value}))} />
+        </div>
+      </div>
+
+      {/* Líneas */}
+      <div className="space-y-2 pt-2">
+        <div className="flex items-center justify-between">
+          <label className="label mb-0">Conceptos / Productos</label>
+          <button type="button" onClick={addLinea} className="text-xs font-semibold" style={{ color: '#C9A84C' }}>+ Añadir línea</button>
+        </div>
+        <div className="hidden md:grid gap-2 text-xs text-gray-500 uppercase tracking-wide pb-1"
+          style={{ gridTemplateColumns: '3fr 1fr 1fr 1fr 1fr 1fr 0.5fr', borderBottom: '1px solid #2a2418' }}>
+          <div>Descripción</div>
+          <div className="text-right">Cant.</div>
+          <div className="text-right">P.Unit.</div>
+          <div className="text-right">IVA</div>
+          <div className="text-right" style={{ color: '#C9A84C' }}>R.Eq.</div>
+          <div className="text-right">Total</div>
+          <div/>
+        </div>
+        {lineas.map((l) => {
+          const { base, iva, recargo, total: totLinea } = calcLinea(l)
+          const busqActiva = lineaActiva === l._id && busq.length > 1
+          return (
+            <div key={l._id} className="grid gap-2 items-center"
+              style={{ gridTemplateColumns: '3fr 1fr 1fr 1fr 1fr 1fr 0.5fr' }}>
+              {/* Descripción */}
+              <div className="relative" style={{ gridColumn: '1' }}>
+                <input className="input text-sm"
+                  placeholder="Descripción o busca producto..."
+                  value={lineaActiva === l._id ? busq : l.descripcion}
+                  onChange={e => {
+                    if (lineaActiva === l._id) { setBusq(e.target.value) }
+                    else { updateLinea(l._id, 'descripcion', e.target.value); if (e.target.value.length > 1) { setLineaActiva(l._id); setBusq(e.target.value) } }
+                  }}
+                  onFocus={() => { if (l.descripcion.length > 1) { setLineaActiva(l._id); setBusq(l.descripcion) } }}
+                  onBlur={() => setTimeout(() => setLineaActiva(null), 200)}
+                />
+                {busqActiva && prodsFiltrados.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 z-50 rounded-lg shadow-xl mt-1 overflow-hidden"
+                    style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+                    {prodsFiltrados.slice(0, 5).map(p => (
+                      <button key={p.id} type="button" onMouseDown={() => seleccionar(p, l._id)}
+                        className="w-full text-left px-3 py-2 hover:bg-white/5 flex justify-between items-center">
+                        <div>
+                          <div className="text-sm text-white">{p.nombre}</div>
+                          <div className="text-xs text-gray-500">{p.referencia || ''}</div>
+                        </div>
+                        <div className="text-xs text-gray-400">Compra: {formatEuro(p.precio_compra)}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {l.producto_id && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs" style={{ color: '#C9A84C' }}>📦</span>}
+              </div>
+              {/* Cantidad */}
+              <input className="input text-right text-sm" type="number" min="0.001" step="0.001"
+                value={l.cantidad} onChange={e => updateLinea(l._id, 'cantidad', e.target.value)} />
+              {/* Precio */}
+              <input className="input text-right text-sm" type="number" min="0" step="0.01" placeholder="0.00"
+                value={l.precio_unitario} onChange={e => updateLinea(l._id, 'precio_unitario', e.target.value)} />
+              {/* IVA */}
+              <select className="input text-xs px-1" value={l.iva_tasa}
+                onChange={e => updateLinea(l._id, 'iva_tasa', e.target.value)}>
+                {[0,4,10,21].map(v => <option key={v} value={v}>{v}%</option>)}
+              </select>
+              {/* Recargo — editable por si necesita ajuste */}
+              <div className="relative">
+                <input className="input text-right text-sm pr-5" type="number" min="0" step="0.1"
+                  value={l.recargo_tasa} onChange={e => updateLinea(l._id, 'recargo_tasa', e.target.value)} />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">%</span>
+              </div>
+              {/* Total línea con tooltip desglose */}
+              <div className="text-right" title={`Base: ${formatEuro(base)}\nIVA: ${formatEuro(iva)}\nR.Eq: ${formatEuro(recargo)}`}>
+                <div className="text-sm font-bold text-white">{formatEuro(totLinea)}</div>
+                <div className="text-xs" style={{ color: '#C9A84C' }}>+{formatEuro(recargo)} RE</div>
+              </div>
+              {/* Borrar */}
+              <button type="button" onClick={() => removeLinea(l._id)} disabled={lineas.length === 1}
+                className="text-gray-600 hover:text-red-400 text-xl leading-none disabled:opacity-20 text-center">×</button>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Totales desglosados */}
+      <div className="rounded-xl p-4 space-y-2" style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+        <div className="flex justify-between text-sm text-gray-400">
+          <span>Base imponible</span>
+          <span className="text-white font-mono">{formatEuro(subtotal)}</span>
+        </div>
+        <div className="flex justify-between text-sm text-gray-400">
+          <span>IVA</span>
+          <span className="text-white font-mono">{formatEuro(ivaTotal)}</span>
+        </div>
+        <div className="flex justify-between text-sm" style={{ color: '#C9A84C' }}>
+          <span className="font-semibold">⚖️ Recargo de Equivalencia</span>
+          <span className="font-mono font-bold">{formatEuro(recargoTotal)}</span>
+        </div>
+        <div className="flex justify-between text-base font-bold pt-2" style={{ borderTop: '1px solid #2a2418' }}>
+          <span className="text-white">TOTAL A PAGAR</span>
+          <span style={{ color: '#C9A84C' }}>{formatEuro(total)}</span>
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-2">
+        <button onClick={onClose} className="btn-secondary">Cancelar</button>
+        <button onClick={handleSave} disabled={saving} className="btn-primary">
+          {saving ? 'Guardando...' : '💾 Guardar compra'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
   const [form, setForm] = useState({
     proveedor_id: '', numero: '', fecha_factura: new Date().toISOString().slice(0,10),
     fecha_vencimiento: '', estado: 'pendiente', notas: '',

@@ -103,7 +103,14 @@ export default function Clientes({ session }) {
             <tbody>
               {filtrados.map(c => (
                 <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                  <td className="py-3 px-4 font-medium text-white">{c.nombre}</td>
+                  <td className="py-3 px-4 font-medium text-white">
+                    <div className="flex items-center gap-2">
+                      {c.nombre}
+                      {c.recargo_equivalencia && (
+                        <span className="text-xs px-1.5 py-0.5 rounded font-bold" style={{ background: 'rgba(201,168,76,0.15)', color: '#C9A84C' }}>RE</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-3 px-4 text-gray-400 font-mono text-xs">{c.nif_cif || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{c.email || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{c.telefono || '—'}</td>
@@ -152,6 +159,18 @@ export default function Clientes({ session }) {
               <div className="col-span-2">
                 <label className="label">Dirección</label>
                 <input className="input" value={form.direccion || ''} onChange={e => setForm({...form, direccion: e.target.value})} />
+              </div>
+              <div className="col-span-2">
+                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border transition-all"
+                  style={{ borderColor: form.recargo_equivalencia ? 'rgba(201,168,76,0.5)' : '#374151', background: form.recargo_equivalencia ? 'rgba(201,168,76,0.08)' : 'transparent' }}>
+                  <input type="checkbox" className="w-4 h-4 accent-yellow-500"
+                    checked={!!form.recargo_equivalencia}
+                    onChange={e => setForm({...form, recargo_equivalencia: e.target.checked})} />
+                  <div>
+                    <div className="text-sm font-semibold text-white">Recargo de Equivalencia</div>
+                    <div className="text-xs text-gray-500">Se añadirá RE en todas las facturas a este cliente (21%→+5,2% · 10%→+1,4% · 4%→+0,5%)</div>
+                  </div>
+                </label>
               </div>
             </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}

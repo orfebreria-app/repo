@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, createFactura, descontarStockVenta, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, createFactura, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
 import { format, addDays } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -29,6 +29,7 @@ export default function NuevaFactura({ session }) {
   const [error,     setError]     = useState('')
   const [busqProducto,    setBusqProducto]    = useState('')
   const [lineaActivaBusq, setLineaActivaBusq] = useState(null)
+  const [clienteRE, setClienteRE] = useState(false)
 
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -57,12 +58,18 @@ export default function NuevaFactura({ session }) {
     init()
   }, [session])
 
-  const subtotal = lineas.reduce((s, l) => s + calcLinea(l), 0)
-  const ivaTotal = lineas.reduce((s, l) => {
+  const subtotal   = lineas.reduce((s, l) => s + calcLinea(l), 0)
+  const ivaTotal   = lineas.reduce((s, l) => {
     const base = calcLinea(l)
     return s + +(base * (Number(l.iva_tasa) / 100)).toFixed(2)
   }, 0)
-  const total = +(subtotal + ivaTotal).toFixed(2)
+  const reTotal = clienteRE
+    ? lineas.reduce((s, l) => {
+        const base = calcLinea(l)
+        return s + +(base * tasaRE(l.iva_tasa) / 100).toFixed(2)
+      }, 0)
+    : 0
+  const total = +(subtotal + ivaTotal + reTotal).toFixed(2)
 
   const addLinea    = () => setLineas([...lineas, lineaVacia()])
   const removeLinea = (id) => lineas.length > 1 && setLineas(lineas.filter(l => l._id !== id))
@@ -98,14 +105,22 @@ export default function NuevaFactura({ session }) {
       empresa_id: empresa.id, cliente_id: form.cliente_id,
       folio, fecha_emision: form.fecha_emision,
       fecha_vencimiento: form.fecha_vencimiento || null,
-      estado: form.estado, subtotal, iva_total: ivaTotal, total, notas: form.notas,
+      estado: form.estado, subtotal, iva_total: ivaTotal,
+      recargo_total: reTotal,
+      total, notas: form.notas,
     }
-    const conceptos = lineas.map(l => ({
-      descripcion: l.descripcion, cantidad: Number(l.cantidad),
-      precio_unitario: Number(l.precio_unitario), iva_tasa: Number(l.iva_tasa),
-      descuento: Number(l.descuento), subtotal: calcLinea(l),
-      producto_id: l.producto_id || null,
-    }))
+    const conceptos = lineas.map(l => {
+      const base = calcLinea(l)
+      const reImporte = clienteRE ? +(base * tasaRE(l.iva_tasa) / 100).toFixed(2) : 0
+      return {
+        descripcion: l.descripcion, cantidad: Number(l.cantidad),
+        precio_unitario: Number(l.precio_unitario), iva_tasa: Number(l.iva_tasa),
+        descuento: Number(l.descuento), subtotal: base,
+        recargo_tasa: clienteRE ? tasaRE(l.iva_tasa) : 0,
+        recargo_importe: reImporte,
+        producto_id: l.producto_id || null,
+      }
+    })
 
     const { data: fact, error: err } = await createFactura(facturaData, conceptos)
     if (err) { setError(err.message); setSaving(false); return }
@@ -143,7 +158,11 @@ export default function NuevaFactura({ session }) {
         <div className="md:col-span-2">
           <label className="label">Cliente *</label>
           <select className="input" value={form.cliente_id}
-            onChange={e => setForm({...form, cliente_id: e.target.value})} required>
+            onChange={e => {
+              const cli = clientes.find(c => c.id === e.target.value)
+              setClienteRE(!!cli?.recargo_equivalencia)
+              setForm({...form, cliente_id: e.target.value})
+            }} required>
             <option value="">— Selecciona un cliente —</option>
             {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
@@ -151,6 +170,12 @@ export default function NuevaFactura({ session }) {
             <p className="text-xs text-yellow-500 mt-1">
               No tienes clientes. <button type="button" onClick={() => navigate('/clientes')} className="underline">Añade uno primero →</button>
             </p>
+          )}
+          {clienteRE && (
+            <div className="mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)' }}>
+              <span style={{ color: '#C9A84C' }}>⚠️</span>
+              <span style={{ color: '#C9A84C' }}>Cliente con <strong>Recargo de Equivalencia</strong> — se añadirá automáticamente en todos los conceptos</span>
+            </div>
           )}
         </div>
         <div>
@@ -283,6 +308,9 @@ export default function NuevaFactura({ session }) {
         <div className="card space-y-2" style={{ background: '#1a1814' }}>
           <Row label="Subtotal" value={formatEuro(subtotal)} />
           <Row label="IVA" value={formatEuro(ivaTotal)} />
+          {clienteRE && reTotal > 0 && (
+            <Row label="Recargo Equivalencia" value={formatEuro(reTotal)} highlight />
+          )}
           <div className="border-t pt-2 flex justify-between items-center" style={{ borderColor: '#2a2418' }}>
             <span className="font-bold text-white text-base">TOTAL</span>
             <span className="font-bold text-xl" style={{ color: '#C9A84C' }}>{formatEuro(total)}</span>
@@ -304,10 +332,10 @@ export default function NuevaFactura({ session }) {
   )
 }
 
-const Row = ({ label, value }) => (
+const Row = ({ label, value, highlight }) => (
   <div className="flex justify-between text-sm">
-    <span className="text-gray-400">{label}</span>
-    <span className="text-gray-200">{value}</span>
+    <span className={highlight ? 'font-medium' : 'text-gray-400'} style={highlight ? { color: '#C9A84C' } : {}}>{label}</span>
+    <span className={highlight ? 'font-bold' : 'text-gray-200'} style={highlight ? { color: '#C9A84C' } : {}}>{value}</span>
   </div>
 )
 

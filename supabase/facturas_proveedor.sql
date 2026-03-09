@@ -54,3 +54,6 @@ create policy "usuario ve sus lineas factura proveedor"
 create trigger facturas_proveedor_actualizado_en
   before update on facturas_proveedor
   for each row execute function update_actualizado_en();
+
+-- Añadir columna cliente_id (por si el emisor de la compra es un cliente)
+alter table facturas_proveedor add column if not exists cliente_id uuid references clientes(id) on delete set null;

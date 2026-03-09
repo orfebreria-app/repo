@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { supabase, getEmpresa, getProductos, descontarStockVenta, formatEuro } from '../lib/supabase'
+import { supabase, getEmpresa, getProductos, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
 import { generarTicketPDF } from '../lib/ticketPDF'
 
 const IVA_OPCIONES = [0, 4, 10, 21]
@@ -26,18 +26,21 @@ const lineaVacia = () => ({
   producto_id: null,
 })
 
-// Precio introducido ya incluye IVA
-const calcLinea = (l) => {
+// En tickets el precio YA incluye IVA (y opcionalmente RE)
+// RE se aplica sobre la base antes de IVA
+const calcLinea = (l, conRE = false) => {
   const totalLinea = +(Number(l.precio_con_iva || 0) * Number(l.cantidad)).toFixed(2)
   const divisor    = 1 + Number(l.iva_tasa) / 100
   const base       = +(totalLinea / divisor).toFixed(2)
   const ivaImporte = +(totalLinea - base).toFixed(2)
-  return { base, ivaImporte, totalLinea }
+  const reImporte  = conRE ? +(base * tasaRE(l.iva_tasa) / 100).toFixed(2) : 0
+  return { base, ivaImporte, reImporte, totalLinea: +(totalLinea + reImporte).toFixed(2) }
 }
 
 export default function Tickets({ session }) {
   const [empresa,   setEmpresa]   = useState(null)
   const [lineas,    setLineas]    = useState([lineaVacia()])
+  const [conRE,     setConRE]     = useState(false)
   const [metodo,    setMetodo]    = useState('efectivo')
   const [efectivo,  setEfectivo]  = useState('')
   const [notas,     setNotas]     = useState('')
@@ -94,10 +97,11 @@ export default function Tickets({ session }) {
     setLineaActivaBusq(null)
   }
 
-  const totalGeneral = lineas.reduce((s, l) => s + calcLinea(l).totalLinea, 0)
-  const baseGeneral  = lineas.reduce((s, l) => s + calcLinea(l).base, 0)
-  const ivaGeneral   = +(totalGeneral - baseGeneral).toFixed(2)
-  const cambio       = metodo === 'efectivo' && efectivo ? +(Number(efectivo) - totalGeneral).toFixed(2) : 0
+  const totalGeneral   = lineas.reduce((s, l) => s + calcLinea(l, conRE).totalLinea, 0)
+  const baseGeneral    = lineas.reduce((s, l) => s + calcLinea(l, conRE).base, 0)
+  const ivaGeneral     = +(lineas.reduce((s, l) => s + calcLinea(l, conRE).ivaImporte, 0)).toFixed(2)
+  const reGeneral      = +(lineas.reduce((s, l) => s + calcLinea(l, conRE).reImporte, 0)).toFixed(2)
+  const cambio         = metodo === 'efectivo' && efectivo ? +(Number(efectivo) - totalGeneral).toFixed(2) : 0
 
   const addLinea    = () => { setLineas(l => [...l, lineaVacia()]); setTimeout(() => descRef.current?.focus(), 50) }
   const removeLinea = (id) => lineas.length > 1 && setLineas(l => l.filter(x => x._id !== id))
@@ -123,6 +127,7 @@ export default function Tickets({ session }) {
         numero,
         subtotal:           +baseGeneral.toFixed(2),
         iva_total:          ivaGeneral,
+        recargo_total:      reGeneral,
         total:              +totalGeneral.toFixed(2),
         metodo_pago:        metodo,
         efectivo_entregado: metodo === 'efectivo' && efectivo ? Number(efectivo) : null,
@@ -135,7 +140,7 @@ export default function Tickets({ session }) {
 
     await supabase.from('lineas_ticket').insert(
       lineas.map((l, i) => {
-        const { totalLinea } = calcLinea(l)
+        const { totalLinea, reImporte } = calcLinea(l, conRE)
         return {
           ticket_id:       ticket.id,
           descripcion:     l.descripcion,
@@ -143,6 +148,8 @@ export default function Tickets({ session }) {
           precio_unitario: Number(l.precio_con_iva),
           iva_tasa:        Number(l.iva_tasa),
           subtotal:        totalLinea,
+          recargo_tasa:    conRE ? tasaRE(l.iva_tasa) : 0,
+          recargo_importe: reImporte,
           orden:           i,
           producto_id:     l.producto_id || null,
         }
@@ -165,6 +172,7 @@ export default function Tickets({ session }) {
     setEfectivo('')
     setNotas('')
     setTicketOk(null)
+    setConRE(false)
   }
 
   const descargarPDF = async (ticket, lineasTicket) => {
@@ -298,7 +306,7 @@ export default function Tickets({ session }) {
               </div>
 
               {lineas.map((l, idx) => {
-                const { totalLinea } = calcLinea(l)
+                const { totalLinea, reImporte } = calcLinea(l, conRE)
                 const busqActiva = lineaActivaBusq === l._id && busqProducto.length > 1
                 return (
                   <div key={l._id} className="grid grid-cols-12 gap-2 items-center">
@@ -373,8 +381,11 @@ export default function Tickets({ session }) {
                         {IVA_OPCIONES.map(v => <option key={v} value={v}>{v}%</option>)}
                       </select>
                     </div>
-                    <div className="col-span-1 text-right text-sm font-semibold text-white hidden md:block">
-                      {formatEuro(totalLinea)}
+                    <div className="col-span-1 text-right hidden md:block">
+                      <div className="text-sm font-semibold text-white">{formatEuro(totalLinea)}</div>
+                      {conRE && reImporte > 0 && (
+                        <div className="text-xs" style={{ color: '#C9A84C' }}>+{formatEuro(reImporte)} RE</div>
+                      )}
                     </div>
                     <div className="col-span-2 md:col-span-1 flex justify-center">
                       <button onClick={() => removeLinea(l._id)} disabled={lineas.length === 1}
@@ -414,12 +425,29 @@ export default function Tickets({ session }) {
               <div className="flex justify-between text-xs text-gray-600">
                 <span>IVA</span><span>{formatEuro(ivaGeneral)}</span>
               </div>
+              {conRE && reGeneral > 0 && (
+                <div className="flex justify-between text-xs font-semibold" style={{ color: '#C9A84C' }}>
+                  <span>Rec. Equivalencia</span><span>{formatEuro(reGeneral)}</span>
+                </div>
+              )}
               <div className="border-t border-gray-700 pt-3 mt-1 flex justify-between items-center">
                 <div>
                   <div className="font-bold text-white text-base">TOTAL</div>
-                  <div className="text-xs text-gray-500">IVA incluido</div>
+                  <div className="text-xs text-gray-500">{conRE ? 'IVA + RE incluido' : 'IVA incluido'}</div>
                 </div>
                 <span className="font-bold text-brand-500 text-2xl">{formatEuro(totalGeneral)}</span>
+              </div>
+
+              {/* Toggle Recargo de Equivalencia */}
+              <div className="border-t border-gray-700 pt-3 mt-1">
+                <label className="flex items-center gap-3 cursor-pointer p-2 rounded-lg transition-all"
+                  style={{ background: conRE ? 'rgba(201,168,76,0.08)' : 'transparent', border: `1px solid ${conRE ? 'rgba(201,168,76,0.3)' : '#374151'}` }}>
+                  <input type="checkbox" className="w-4 h-4" checked={conRE} onChange={e => setConRE(e.target.checked)} />
+                  <div>
+                    <div className="text-xs font-semibold" style={{ color: conRE ? '#C9A84C' : '#9ca3af' }}>Rec. Equivalencia</div>
+                    <div className="text-xs text-gray-600">21%→+5,2% · 10%→+1,4% · 4%→+0,5%</div>
+                  </div>
+                </label>
               </div>
             </div>
 

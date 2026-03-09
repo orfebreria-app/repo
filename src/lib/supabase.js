@@ -9,6 +9,16 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
+// ── Recargo de Equivalencia ───────────────────────────
+// Devuelve la tasa RE correspondiente al IVA
+export const tasaRE = (ivaTasa) => {
+  const t = Number(ivaTasa)
+  if (t === 21) return 5.2
+  if (t === 10) return 1.4
+  if (t === 4)  return 0.5
+  return 0
+}
+
 // ── Auth helpers ──────────────────────────────────────
 export const signIn = (email, password) =>
   supabase.auth.signInWithPassword({ email, password })
@@ -85,7 +95,6 @@ export const getFactura = async (id) => {
 }
 
 export const createFactura = async (factura, conceptos) => {
-  // 1. Crear factura
   const { data: fact, error: errFact } = await supabase
     .from('facturas')
     .insert(factura)
@@ -93,14 +102,12 @@ export const createFactura = async (factura, conceptos) => {
     .single()
   if (errFact) return { data: null, error: errFact }
 
-  // 2. Crear conceptos
   const items = conceptos.map((c, i) => ({ ...c, factura_id: fact.id, orden: i }))
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { data: null, error: errConc }
 
-  // 3. Incrementar folio en empresa
   await supabase.rpc('increment_folio', { empresa_id_param: factura.empresa_id })
-    .catch(() => {}) // si la función no existe, no bloquea
+    .catch(() => {})
 
   return { data: fact, error: null }
 }
@@ -278,7 +285,7 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
 export const getFacturasProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
-    .select('*, proveedores(nombre)')
+    .select('*, proveedores(nombre), clientes(nombre)')
     .eq('empresa_id', empresaId)
     .order('fecha_factura', { ascending: false })
   return { data: data || [], error }
@@ -296,7 +303,7 @@ export const getFacturaProveedor = async (id) => {
 export const createFacturaProveedor = async (factura, lineas) => {
   const { data: fp, error: errFp } = await supabase
     .from('facturas_proveedor')
-    .insert(factura)
+    .insert(factura)   // factura ya incluye cliente_id o proveedor_id según corresponda
     .select()
     .single()
   if (errFp) return { data: null, error: errFp }
@@ -341,4 +348,12 @@ export const updateEstadoFacturaProveedor = async (id, estado) => {
 export const deleteFacturaProveedor = async (id) => {
   const { error } = await supabase.from('facturas_proveedor').delete().eq('id', id)
   return { error }
+}
+
+// ── Recargo de Equivalencia ───────────────────────────
+export const RE_TASAS = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
+
+export const calcRecargoLinea = (base, ivaTasa) => {
+  const reTasa = RE_TASAS[Number(ivaTasa)] ?? 0
+  return +(base * reTasa / 100).toFixed(2)
 }

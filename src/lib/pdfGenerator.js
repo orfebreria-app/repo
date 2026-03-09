@@ -182,17 +182,24 @@ async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoD
   // Totales
   const totW = 70
   const totX = W - M - totW
+  const reImporte = factura.recargo_total || 0
+  const boxH = reImporte > 0 ? 40 : 32
   doc.setFillColor(248, 249, 250)
-  doc.roundedRect(totX, y, totW, 32, 2, 2, 'F')
+  doc.roundedRect(totX, y, totW, boxH, 2, 2, 'F')
 
   doc.setFontSize(9)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(80, 80, 80)
   doc.text('Subtotal:', totX + 5, y + 9)
   doc.text('IVA:', totX + 5, y + 17)
-  doc.setFont('helvetica', 'bold')
-  doc.setTextColor(r, g, b)
-  doc.text('TOTAL:', totX + 5, y + 26)
+  if (reImporte > 0) {
+    doc.text('R.Equiv.:', totX + 5, y + 25)
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+    doc.text('TOTAL:', totX + 5, y + 35)
+  } else {
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+    doc.text('TOTAL:', totX + 5, y + 26)
+  }
 
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(30, 30, 30)
@@ -201,7 +208,14 @@ async function plantillaModerna(doc, { factura, empresa, conceptos, color, logoD
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(11)
   doc.setTextColor(r, g, b)
-  doc.text(fmt(factura.total), totX + totW - 5, y + 26, { align: 'right' })
+  if (reImporte > 0) {
+    doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(30,30,30)
+    doc.text(fmt(reImporte), totX + totW - 5, y + 25, { align: 'right' })
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(r,g,b)
+    doc.text(fmt(factura.total), totX + totW - 5, y + 35, { align: 'right' })
+  } else {
+    doc.text(fmt(factura.total), totX + totW - 5, y + 26, { align: 'right' })
+  }
 
   // Notas factura o notas por defecto
   const notasTexto = factura.notas || notasDefault
@@ -354,7 +368,11 @@ async function plantillaClasica(doc, { factura, empresa, conceptos, color, logoD
   doc.text('Subtotal:', totX, y)
   doc.text(fmt(factura.subtotal), W - M, y, { align: 'right' }); y += 7
   doc.text('IVA:', totX, y)
-  doc.text(fmt(factura.iva_total), W - M, y, { align: 'right' }); y += 2
+  doc.text(fmt(factura.iva_total), W - M, y, { align: 'right' }); y += 7
+  if (factura.recargo_total > 0) {
+    doc.text('Rec. Equivalencia:', totX, y)
+    doc.text(fmt(factura.recargo_total), W - M, y, { align: 'right' }); y += 2
+  } else { y -= 5 }
   doc.setDrawColor(r, g, b)
   doc.line(totX, y + 2, W - M, y + 2); y += 8
   doc.setFont('helvetica', 'bold')
@@ -501,7 +519,11 @@ async function plantillaMinimalista(doc, { factura, empresa, conceptos, color, l
   doc.text('Subtotal', W - M - 50, y)
   doc.text(fmt(factura.subtotal), W - M, y, { align: 'right' }); y += 6
   doc.text('IVA', W - M - 50, y)
-  doc.text(fmt(factura.iva_total), W - M, y, { align: 'right' }); y += 2
+  doc.text(fmt(factura.iva_total), W - M, y, { align: 'right' }); y += 6
+  if (factura.recargo_total > 0) {
+    doc.text('Rec. Equivalencia', W - M - 50, y)
+    doc.text(fmt(factura.recargo_total), W - M, y, { align: 'right' }); y += 2
+  } else { y -= 4 }
   doc.setDrawColor(r, g, b)
   doc.setLineWidth(0.5)
   doc.line(W - M - 55, y + 2, W - M, y + 2); y += 8
