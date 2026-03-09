@@ -23,3 +23,7 @@ ALTER TABLE lineas_factura_proveedor ADD COLUMN IF NOT EXISTS recargo_importe de
 ALTER TABLE facturas            ADD COLUMN IF NOT EXISTS recargo_total decimal(12,2) default 0;
 ALTER TABLE facturas_proveedor  ADD COLUMN IF NOT EXISTS recargo_total decimal(12,2) default 0;
 ALTER TABLE tickets             ADD COLUMN IF NOT EXISTS recargo_total decimal(12,2) default 0;
+
+-- Código postal en clientes y proveedores (si no existe)
+ALTER TABLE clientes    ADD COLUMN IF NOT EXISTS cp varchar(10) default '';
+ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS cp varchar(10) default '';

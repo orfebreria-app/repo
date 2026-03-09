@@ -357,3 +357,53 @@ export const calcRecargoLinea = (base, ivaTasa) => {
   const reTasa = RE_TASAS[Number(ivaTasa)] ?? 0
   return +(base * reTasa / 100).toFixed(2)
 }
+
+// ── Editar factura completa ───────────────────────────
+export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conceptosNuevos, conceptosOriginales) => {
+  // 1. Actualizar cabecera
+  const { error: errCab } = await supabase
+    .from('facturas')
+    .update(cabecera)
+    .eq('id', facturaId)
+  if (errCab) return { error: errCab }
+
+  // 2. Revertir stock de los conceptos originales con producto
+  for (const c of (conceptosOriginales || []).filter(c => c.producto_id)) {
+    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
+    if (!prod) continue
+    const anterior  = Number(prod.stock_actual)
+    const posterior = anterior + Number(c.cantidad) // devolver lo que se descontó
+    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
+    await supabase.from('movimientos_stock').insert({
+      empresa_id: empresaId, producto_id: c.producto_id,
+      tipo: 'ajuste_positivo', cantidad: Number(c.cantidad),
+      stock_anterior: anterior, stock_posterior: posterior,
+      referencia_id: facturaId, referencia_tipo: 'factura',
+      notas: 'Reversión por edición de factura',
+    })
+  }
+
+  // 3. Borrar conceptos viejos e insertar nuevos
+  await supabase.from('conceptos_factura').delete().eq('factura_id', facturaId)
+  const items = conceptosNuevos.map((c, i) => ({ ...c, factura_id: facturaId, orden: i }))
+  const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
+  if (errConc) return { error: errConc }
+
+  // 4. Descontar stock de los nuevos conceptos con producto
+  for (const c of conceptosNuevos.filter(c => c.producto_id)) {
+    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
+    if (!prod) continue
+    const anterior  = Number(prod.stock_actual)
+    const posterior = anterior - Number(c.cantidad)
+    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
+    await supabase.from('movimientos_stock').insert({
+      empresa_id: empresaId, producto_id: c.producto_id,
+      tipo: 'salida_factura', cantidad: -Number(c.cantidad),
+      stock_anterior: anterior, stock_posterior: posterior,
+      referencia_id: facturaId, referencia_tipo: 'factura',
+      notas: 'Edición de factura',
+    })
+  }
+
+  return { error: null }
+}

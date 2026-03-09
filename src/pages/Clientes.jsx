@@ -156,6 +156,10 @@ export default function Clientes({ session }) {
                 <label className="label">Ciudad</label>
                 <input className="input" value={form.ciudad || ''} onChange={e => setForm({...form, ciudad: e.target.value})} />
               </div>
+              <div>
+                <label className="label">Código Postal</label>
+                <input className="input" placeholder="28001" maxLength={10} value={form.cp || ''} onChange={e => setForm({...form, cp: e.target.value})} />
+              </div>
               <div className="col-span-2">
                 <label className="label">Dirección</label>
                 <input className="input" value={form.direccion || ''} onChange={e => setForm({...form, direccion: e.target.value})} />

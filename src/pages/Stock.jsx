@@ -543,7 +543,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
 function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   const [form, setForm] = useState({
     nombre: '', nif_cif: '', email: '', telefono: '',
-    ciudad: '', direccion: '', web: '', notas: '', activo: true,
+    ciudad: '', cp: '', direccion: '', web: '', notas: '', activo: true,
     ...proveedor, empresa_id: empresaId,
   })
   const [saving, setSaving] = useState(false)
@@ -579,6 +579,10 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
         <div>
           <label className="label">Ciudad</label>
           <input className="input" placeholder="Madrid" {...f('ciudad')} />
+        </div>
+        <div>
+          <label className="label">Código Postal</label>
+          <input className="input" placeholder="28001" maxLength={10} {...f('cp')} />
         </div>
         <div className="md:col-span-2">
           <label className="label">Dirección</label>
