@@ -543,7 +543,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
 function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   const [form, setForm] = useState({
     nombre: '', nif_cif: '', email: '', telefono: '',
-    ciudad: '', cp: '', direccion: '', web: '', notas: '', activo: true,
+    ciudad: '', cp: '', pais: 'España', direccion: '', web: '', notas: '', activo: true,
     ...proveedor, empresa_id: empresaId,
   })
   const [saving, setSaving] = useState(false)
@@ -559,7 +559,7 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
 
   return (
     <Modal title={!proveedor.id ? '+ Nuevo proveedor' : `✏️ ${proveedor.nombre}`} onClose={onClose}>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="md:col-span-2">
           <label className="label">Nombre *</label>
           <input className="input" placeholder="Proveedor S.L." {...f('nombre')} />
@@ -584,6 +584,10 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
           <label className="label">Código Postal</label>
           <input className="input" placeholder="28001" maxLength={10} {...f('cp')} />
         </div>
+        <div>
+          <label className="label">País</label>
+          <input className="input" placeholder="España" {...f('pais')} />
+        </div>
         <div className="md:col-span-2">
           <label className="label">Dirección</label>
           <input className="input" placeholder="Calle Mayor 1" {...f('direccion')} />
@@ -597,7 +601,7 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
           <input className="input" placeholder="Notas internas" {...f('notas')} />
         </div>
       </div>
-      <div className="flex justify-end gap-3 pt-2">
+      <div className="flex justify-end gap-3 pt-3">
         <button onClick={onClose} className="btn-secondary">Cancelar</button>
         <button onClick={handleSave} disabled={saving} className="btn-primary">
           {saving ? 'Guardando...' : '💾 Guardar'}

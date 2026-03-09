@@ -27,3 +27,7 @@ ALTER TABLE tickets             ADD COLUMN IF NOT EXISTS recargo_total decimal(1
 -- Código postal en clientes y proveedores (si no existe)
 ALTER TABLE clientes    ADD COLUMN IF NOT EXISTS cp varchar(10) default '';
 ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS cp varchar(10) default '';
+
+-- País en clientes y proveedores
+ALTER TABLE clientes    ADD COLUMN IF NOT EXISTS pais varchar(100) default 'España';
+ALTER TABLE proveedores ADD COLUMN IF NOT EXISTS pais varchar(100) default 'España';
