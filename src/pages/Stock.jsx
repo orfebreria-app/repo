@@ -994,8 +994,3 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
     </Modal>
   )
 }
-      </div>
-    </Modal>
-  )
-}
-
