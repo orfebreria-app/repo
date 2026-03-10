@@ -315,23 +315,15 @@ export default function Tickets({ session }) {
                         ref={idx === lineas.length - 1 ? descRef : null}
                         className="input text-sm"
                         placeholder="Ej: Trofeo grabado o busca catálogo..."
-                        value={lineaActivaBusq === l._id ? busqProducto : l.descripcion}
+                        value={l.descripcion}
                         onChange={e => {
-                          if (lineaActivaBusq === l._id) {
-                            setBusqProducto(e.target.value)
-                          } else {
-                            updateLinea(l._id, 'descripcion', e.target.value)
-                            if (e.target.value.length > 1) {
-                              setLineaActivaBusq(l._id)
-                              setBusqProducto(e.target.value)
-                            }
-                          }
+                          const val = e.target.value
+                          updateLinea(l._id, 'descripcion', val)
+                          if (val.length > 1) { setBusqProducto(val); setLineaActivaBusq(l._id) }
+                          else { setBusqProducto(''); setLineaActivaBusq(null) }
                         }}
                         onFocus={() => {
-                          if (l.producto_id || l.descripcion.length > 1) {
-                            setLineaActivaBusq(l._id)
-                            setBusqProducto(l.descripcion)
-                          }
+                          if (l.descripcion.length > 1) { setBusqProducto(l.descripcion); setLineaActivaBusq(l._id) }
                         }}
                         onBlur={() => setTimeout(() => setLineaActivaBusq(null), 200)}
                         onKeyDown={e => e.key === 'Enter' && !busqActiva && addLinea()}

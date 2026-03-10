@@ -332,12 +332,16 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
                   <div className="relative">
                     <input className="input text-sm w-full"
                       placeholder="Descripción o busca catálogo..."
-                      value={lineaActiva === l._id ? busqProd : l.descripcion}
+                      value={l.descripcion}
                       onChange={e => {
-                        if (lineaActiva === l._id) { setBusqProd(e.target.value) }
-                        else { updateLinea(l._id, 'descripcion', e.target.value); if (e.target.value.length > 1) { setLineaActiva(l._id); setBusqProd(e.target.value) } }
+                        const val = e.target.value
+                        updateLinea(l._id, 'descripcion', val)
+                        if (val.length > 1) { setBusqProd(val); setLineaActiva(l._id) }
+                        else { setBusqProd(''); setLineaActiva(null) }
                       }}
-                      onFocus={() => { if (l.descripcion.length > 1) { setLineaActiva(l._id); setBusqProd(l.descripcion) } }}
+                      onFocus={() => {
+                        if (l.descripcion.length > 1) { setBusqProd(l.descripcion); setLineaActiva(l._id) }
+                      }}
                       onBlur={() => setTimeout(() => setLineaActiva(null), 200)}
                     />
                     {busqActiva && prodsFiltrados.length > 0 && (

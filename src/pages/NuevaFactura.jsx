@@ -231,16 +231,16 @@ export default function NuevaFactura({ session }) {
               <div className="col-span-12 md:col-span-4 relative">
                 <input className="input"
                   placeholder={`Concepto ${idx + 1} — o escribe para buscar catálogo`}
-                  value={lineaActivaBusq === l._id ? busqProducto : l.descripcion}
+                  value={l.descripcion}
                   onChange={e => {
-                    if (lineaActivaBusq === l._id) {
-                      setBusqProducto(e.target.value)
-                    } else {
-                      updateLinea(l._id, 'descripcion', e.target.value)
-                      if (e.target.value.length > 1) { setLineaActivaBusq(l._id); setBusqProducto(e.target.value) }
-                    }
+                    const val = e.target.value
+                    updateLinea(l._id, 'descripcion', val)
+                    if (val.length > 1) { setBusqProducto(val); setLineaActivaBusq(l._id) }
+                    else { setBusqProducto(''); setLineaActivaBusq(null) }
                   }}
-                  onFocus={() => { if (l.descripcion.length > 1) { setLineaActivaBusq(l._id); setBusqProducto(l.descripcion) } }}
+                  onFocus={() => {
+                    if (l.descripcion.length > 1) { setBusqProducto(l.descripcion); setLineaActivaBusq(l._id) }
+                  }}
                   onBlur={() => setTimeout(() => setLineaActivaBusq(null), 200)}
                 />
                 {busqActiva && productosFiltrados.length > 0 && (
