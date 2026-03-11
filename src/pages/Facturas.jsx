@@ -214,7 +214,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
     setError('')
     if (!form.folio.trim())   return setError('El número de factura es obligatorio')
     if (!form.cliente_id)     return setError('Selecciona un cliente')
-    if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return setError('Completa todos los conceptos')
+    if (lineas.some(l => !l.descripcion.trim() || l.precio_unitario === '' || l.precio_unitario === null || l.precio_unitario === undefined)) return setError('Completa todos los conceptos')
 
     setSaving(true)
     const cabecera = {
@@ -315,20 +315,19 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
 
             {/* Cabeceras desktop */}
             <div className="hidden md:grid gap-1.5 text-xs text-gray-500 uppercase tracking-wide pb-1"
-              style={{ gridTemplateColumns: '2.5fr 0.8fr 1fr 0.6fr 0.5fr 0.6fr 0.7fr 24px', borderBottom: '1px solid #2a2418' }}>
+              style={{ gridTemplateColumns: '2.5fr 0.8fr 1fr 0.6fr 0.5fr 0.8fr 24px', borderBottom: '1px solid #2a2418' }}>
               <div>Descripción</div><div className="text-right">Cant.</div>
               <div className="text-right">Precio</div><div className="text-center">IVA</div>
-              <div className="text-center">Dto%</div><div className="text-center">RE</div>
+              <div className="text-center">Dto%</div>
               <div className="text-right">Subtotal</div><div/>
             </div>
 
             {lineas.map((l) => {
               const busqActiva = lineaActiva === l._id && busqProd.length > 1
               const base = calcLinea(l)
-              const reImp = +(base * Number(l.recargo_tasa || 0) / 100).toFixed(2)
               return (
                 <div key={l._id} className="hidden md:grid gap-1.5 items-center"
-                  style={{ gridTemplateColumns: '2.5fr 0.8fr 1fr 0.6fr 0.5fr 0.6fr 0.7fr 24px' }}>
+                  style={{ gridTemplateColumns: '2.5fr 0.8fr 1fr 0.6fr 0.5fr 0.8fr 24px' }}>
                   <div className="relative">
                     <input className="input text-sm w-full"
                       placeholder="Descripción o busca catálogo..."
@@ -375,17 +374,8 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
                   <input className="input text-right text-xs" type="number" min="0" max="100" step="1"
                     placeholder="0" value={l.descuento || 0}
                     onChange={e => updateLinea(l._id, 'descuento', e.target.value)} />
-                  <button type="button"
-                    onClick={() => updateLinea(l._id, 'recargo_tasa', Number(l.recargo_tasa||0) > 0 ? 0 : tasaRE(l.iva_tasa))}
-                    className="py-1.5 rounded-lg text-xs font-bold border transition-all"
-                    style={Number(l.recargo_tasa||0) > 0
-                      ? { background:'rgba(201,168,76,0.2)', color:'#C9A84C', borderColor:'rgba(201,168,76,0.5)' }
-                      : { background:'transparent', color:'#6b7280', borderColor:'#374151' }}>
-                    {Number(l.recargo_tasa||0) > 0 ? `${l.recargo_tasa}%` : 'RE'}
-                  </button>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-white">{formatEuro(base)}</div>
-                    {reImp > 0 && <div className="text-xs" style={{ color: '#C9A84C' }}>+{formatEuro(reImp)}</div>}
                   </div>
                   <button type="button" onClick={() => removeLinea(l._id)} disabled={lineas.length === 1}
                     className="text-gray-600 hover:text-red-400 text-lg leading-none disabled:opacity-20">×</button>
@@ -408,13 +398,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
                       {[0,4,10,21].map(v => <option key={v} value={v}>{v}%</option>)}
                     </select>
                   </div>
-                  <div className="flex justify-between">
-                    <button type="button"
-                      onClick={() => updateLinea(l._id, 'recargo_tasa', Number(l.recargo_tasa||0) > 0 ? 0 : tasaRE(l.iva_tasa))}
-                      className="text-xs px-2 py-1 rounded border font-semibold"
-                      style={Number(l.recargo_tasa||0) > 0 ? { background:'rgba(201,168,76,0.2)', color:'#C9A84C', borderColor:'rgba(201,168,76,0.5)' } : { color:'#6b7280', borderColor:'#374151' }}>
-                      {Number(l.recargo_tasa||0) > 0 ? `✓ RE ${l.recargo_tasa}%` : '+ RE'}
-                    </button>
+                  <div className="flex justify-end">
                     <button type="button" onClick={() => removeLinea(l._id)} disabled={lineas.length === 1}
                       className="text-red-400 text-sm disabled:opacity-20">Eliminar</button>
                   </div>

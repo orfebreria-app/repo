@@ -173,12 +173,15 @@ export default function NuevaFactura({ session }) {
               No tienes clientes. <button type="button" onClick={() => navigate('/clientes')} className="underline">Añade uno primero →</button>
             </p>
           )}
-          {clienteRE && (
-            <div className="mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)' }}>
-              <span style={{ color: '#C9A84C' }}>⚠️</span>
-              <span style={{ color: '#C9A84C' }}>Cliente con <strong>Recargo de Equivalencia</strong> — se añadirá automáticamente en todos los conceptos</span>
-            </div>
-          )}
+          <label className="mt-2 flex items-center gap-3 cursor-pointer px-3 py-2 rounded-lg border transition-all"
+            style={{ borderColor: clienteRE ? 'rgba(201,168,76,0.4)' : '#374151', background: clienteRE ? 'rgba(201,168,76,0.08)' : 'transparent' }}>
+            <input type="checkbox" className="w-4 h-4 accent-yellow-500"
+              checked={clienteRE}
+              onChange={e => setClienteRE(e.target.checked)} />
+            <span className="text-xs" style={{ color: clienteRE ? '#C9A84C' : '#9ca3af' }}>
+              <strong>Recargo de Equivalencia</strong> — se añadirá en todos los conceptos (21%→+5,2% · 10%→+1,4% · 4%→+0,5%)
+            </span>
+          </label>
         </div>
         <div>
           <label className="label">Fecha de emisión *</label>
