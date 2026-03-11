@@ -300,10 +300,10 @@ export const getFacturaProveedor = async (id) => {
   return { data, error }
 }
 
-export const createFacturaProveedor = async (factura, lineas) => {
+export const createFacturaProveedor = async (factura, lineas, vencimientos = []) => {
   const { data: fp, error: errFp } = await supabase
     .from('facturas_proveedor')
-    .insert(factura)   // factura ya incluye cliente_id o proveedor_id según corresponda
+    .insert(factura)
     .select()
     .single()
   if (errFp) return { data: null, error: errFp }
@@ -311,6 +311,15 @@ export const createFacturaProveedor = async (factura, lineas) => {
   const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
   const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
   if (errL) return { data: null, error: errL }
+
+  // Guardar plazos de vencimiento si los hay
+  if (vencimientos.length > 0) {
+    const plazos = vencimientos.map(v => ({
+      factura_id: fp.id, empresa_id: factura.empresa_id,
+      fecha: v.fecha, importe: Number(v.importe), notas: v.notas || null,
+    }))
+    await supabase.from('vencimientos_factura_proveedor').insert(plazos)
+  }
 
   // Sumar stock de productos vinculados
   for (const linea of lineas.filter(l => l.producto_id)) {

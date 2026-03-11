@@ -738,8 +738,9 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
 
   const [form, setForm] = useState({
     proveedor_id: '', numero: '', fecha_factura: new Date().toISOString().slice(0,10),
-    fecha_vencimiento: '', estado: 'pendiente', notas: '',
+    estado: 'pendiente', notas: '',
   })
+  const [vencimientos, setVencimientos] = useState([{ _id: '1', fecha: '', importe: '', notas: '' }])
   const [lineas, setLineas]     = useState([lineaVacia()])
   const [saving, setSaving]     = useState(false)
   const [busq, setBusq]         = useState('')
@@ -782,13 +783,16 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
 
   const handleSave = async () => {
     if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return alert('Completa todos los conceptos')
+    // Validar plazos: si tienen fecha deben tener importe
+    const plazosValidos = vencimientos.filter(v => v.fecha || v.importe)
+    if (plazosValidos.some(v => !v.fecha || !v.importe)) return alert('Cada plazo de vencimiento necesita fecha e importe')
     setSaving(true)
     const facturaData = {
       empresa_id: empresaId,
       proveedor_id: form.proveedor_id || null,
       numero: form.numero || null,
       fecha_factura: form.fecha_factura,
-      fecha_vencimiento: form.fecha_vencimiento || null,
+      fecha_vencimiento: plazosValidos[0]?.fecha || null, // primer plazo como fecha principal
       estado: form.estado,
       subtotal, iva_total: ivaTotal, recargo_total: recargoTotal, total,
       notas: form.notas || null,
@@ -802,7 +806,7 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
         subtotal: base, producto_id: l.producto_id || null, orden: i,
       }
     })
-    const { error } = await createFacturaProveedor(facturaData, lineasData)
+    const { error } = await createFacturaProveedor(facturaData, lineasData, plazosValidos)
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     onSaved()
   }
@@ -844,6 +848,66 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
           <input className="input" placeholder="Notas opcionales..."
             value={form.notas} onChange={e => setForm(f => ({...f, notas: e.target.value}))} />
         </div>
+      </div>
+
+      {/* Plazos de vencimiento */}
+      <div className="space-y-2 pt-1">
+        <div className="flex items-center justify-between">
+          <label className="label mb-0">📅 Vencimientos / Plazos de pago</label>
+          <button type="button"
+            onClick={() => setVencimientos(v => [...v, { _id: Math.random().toString(36).slice(2), fecha: '', importe: '', notas: '' }])}
+            className="text-xs font-semibold" style={{ color: '#C9A84C' }}>
+            + Añadir plazo
+          </button>
+        </div>
+        <div className="space-y-2">
+          {vencimientos.map((v, i) => (
+            <div key={v._id} className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg" style={{ background: 'rgba(201,168,76,0.05)', border: '1px solid rgba(201,168,76,0.15)' }}>
+              <div className="col-span-1 text-xs text-center font-bold" style={{ color: '#C9A84C' }}>
+                {i + 1}
+              </div>
+              <div className="col-span-4">
+                <label className="text-xs text-gray-500 mb-0.5 block">Fecha</label>
+                <input type="date" className="input text-sm"
+                  value={v.fecha}
+                  onChange={e => setVencimientos(vs => vs.map(x => x._id === v._id ? {...x, fecha: e.target.value} : x))} />
+              </div>
+              <div className="col-span-3">
+                <label className="text-xs text-gray-500 mb-0.5 block">Importe €</label>
+                <input type="number" className="input text-sm text-right" placeholder="0.00" min="0" step="0.01"
+                  value={v.importe}
+                  onChange={e => setVencimientos(vs => vs.map(x => x._id === v._id ? {...x, importe: e.target.value} : x))} />
+              </div>
+              <div className="col-span-3">
+                <label className="text-xs text-gray-500 mb-0.5 block">Nota (opt.)</label>
+                <input className="input text-sm" placeholder="Ej: 1er plazo"
+                  value={v.notas}
+                  onChange={e => setVencimientos(vs => vs.map(x => x._id === v._id ? {...x, notas: e.target.value} : x))} />
+              </div>
+              <div className="col-span-1 flex justify-center pt-4">
+                <button type="button" onClick={() => vencimientos.length > 1 && setVencimientos(vs => vs.filter(x => x._id !== v._id))}
+                  className="text-gray-600 hover:text-red-400 text-lg leading-none disabled:opacity-20"
+                  disabled={vencimientos.length === 1}>×</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* Resumen importes vs total */}
+        {(() => {
+          const sumPlazos = vencimientos.reduce((s, v) => s + Number(v.importe || 0), 0)
+          const diff = +(total - sumPlazos).toFixed(2)
+          if (total === 0) return null
+          return (
+            <div className="flex justify-end gap-4 text-xs pt-1">
+              <span className="text-gray-500">Total factura: <strong className="text-white">{formatEuro(total)}</strong></span>
+              <span className="text-gray-500">Plazos: <strong className="text-white">{formatEuro(sumPlazos)}</strong></span>
+              {diff !== 0 && <span style={{ color: diff > 0 ? '#f87171' : '#C9A84C' }}>
+                {diff > 0 ? `Falta: ${formatEuro(diff)}` : `Exceso: ${formatEuro(Math.abs(diff))}`}
+              </span>}
+              {diff === 0 && <span className="text-green-400">✓ Cuadrado</span>}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Líneas */}
