@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, createFactura, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
 import { format, addDays } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -31,6 +31,7 @@ export default function NuevaFactura({ session }) {
   const [lineaActivaBusq, setLineaActivaBusq] = useState(null)
   const [clienteRE, setClienteRE] = useState(false)
   const [folioEditado, setFolioEditado] = useState('')
+  const [siguienteFolio, setSiguienteFolio] = useState(null) // null = cargando
 
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -47,12 +48,19 @@ export default function NuevaFactura({ session }) {
       const { data: emp } = await getEmpresa(session.user.id)
       setEmpresa(emp)
       if (emp) {
-        const [{ data: cls }, { data: prods }] = await Promise.all([
+        const [{ data: cls }, { data: prods }, { data: facts }] = await Promise.all([
           getClientes(emp.id),
           getProductos(emp.id),
+          getFacturas(emp.id),
         ])
         setClientes(cls)
         setProductos(prods || [])
+        // Calcular el siguiente folio real mirando las facturas existentes
+        const maxNum = (facts || []).reduce((max, f) => {
+          const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0
+          return n > max ? n : max
+        }, 0)
+        setSiguienteFolio(maxNum + 1)
       }
       setLoading(false)
     }
@@ -101,7 +109,7 @@ export default function NuevaFactura({ session }) {
       return setError('Completa todos los conceptos')
 
     setSaving(true)
-    const folioAuto = `${empresa.serie}-${String(empresa.siguiente_folio).padStart(4, '0')}`
+    const folioAuto = `${empresa.serie}-${String(siguienteFolio || 1).padStart(4, '0')}`
     const folio = folioEditado.trim() || folioAuto
     const facturaData = {
       empresa_id: empresa.id, cliente_id: form.cliente_id,
@@ -207,9 +215,9 @@ export default function NuevaFactura({ session }) {
           </label>
           <input
             className="input font-mono"
-            value={folioEditado || `${empresa.serie}-${String(empresa.siguiente_folio).padStart(4,'0')}`}
+            value={folioEditado || (siguienteFolio ? `${empresa.serie}-${String(siguienteFolio).padStart(4,'0')}` : '...')}
             onChange={e => setFolioEditado(e.target.value)}
-            placeholder={`${empresa.serie}-${String(empresa.siguiente_folio).padStart(4,'0')}`}
+            placeholder={siguienteFolio ? `${empresa.serie}-${String(siguienteFolio).padStart(4,'0')}` : 'Cargando...'}
           />
         </div>
       </div>

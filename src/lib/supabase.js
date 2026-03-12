@@ -81,8 +81,14 @@ export const getFacturas = async (empresaId) => {
     .from('facturas')
     .select(`*, clientes(nombre, email)`)
     .eq('empresa_id', empresaId)
-    .order('creado_en', { ascending: false })
-  return { data: data || [], error }
+    .order('fecha_emision', { ascending: false })
+  // Ordenar por número extraído del folio (FAC-0012 → 12)
+  const sorted = (data || []).sort((a, b) => {
+    const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
+    const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
+    return numB - numA
+  })
+  return { data: sorted, error }
 }
 
 export const getFactura = async (id) => {

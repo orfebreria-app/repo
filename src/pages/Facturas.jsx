@@ -29,7 +29,16 @@ export default function Facturas({ session }) {
   const [pdfFactura,  setPdfFactura]  = useState(null)
   const [editFactura, setEditFactura] = useState(null)
 
-  const cargar = async (emp) => { const { data } = await getFacturas(emp.id); setFacturas(data) }
+  const sortFacturas = (arr) => [...(arr || [])].sort((a, b) => {
+    const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
+    const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
+    return numB - numA
+  })
+
+  const cargar = async (emp) => {
+    const { data } = await getFacturas(emp.id)
+    setFacturas(sortFacturas(data))
+  }
 
   useEffect(() => {
     const init = async () => {
@@ -46,9 +55,10 @@ export default function Facturas({ session }) {
   const handlePDF     = async (id) => { const { data } = await getFactura(id); if (data) setPdfFactura(data) }
   const handleEdit    = async (id) => { const { data } = await getFactura(id); if (data) setEditFactura(data) }
 
-  const filtradas = facturas
+  const filtradas = sortFacturas(facturas
     .filter(f => filtro === 'todos' || f.estado === filtro)
     .filter(f => f.folio.toLowerCase().includes(buscar.toLowerCase()) || (f.clientes?.nombre || '').toLowerCase().includes(buscar.toLowerCase()))
+  )
 
   if (loading) return <Skeleton />
 
