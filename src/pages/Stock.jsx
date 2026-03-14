@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getEmpresa, getProductos, upsertProducto, deleteProducto,
+import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          getProveedores, upsertProveedor, deleteProveedor,
          getMovimientos, entradaStock, ajusteStock,
          getFacturasProveedor, createFacturaProveedor,
@@ -152,20 +152,26 @@ export default function Stock({ session }) {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ borderBottom: '1px solid #2a2418' }}>
-                  {['Referencia', 'Producto', 'Categoría', 'Proveedor', 'Precio venta', 'Stock', 'Acciones'].map(h => (
+                  {['', 'Referencia', 'Producto', 'Categoría', 'Proveedor', 'Precio venta', 'Stock', 'Acciones'].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wide font-semibold">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {productosFiltrados.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-12 text-gray-600">No hay productos. Crea el primero →</td></tr>
+                  <tr><td colSpan={8} className="text-center py-12 text-gray-600">No hay productos. Crea el primero →</td></tr>
                 )}
                 {productosFiltrados.map(p => {
                   const bajo = p.stock_actual <= p.stock_minimo && p.stock_minimo > 0
                   const sinStock = p.stock_actual <= 0
                   return (
                     <tr key={p.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
+                      <td className="px-3 py-2 w-12">
+                        {p.imagen_url
+                          ? <img src={p.imagen_url} alt={p.nombre} className="w-10 h-10 object-cover rounded-lg border border-gray-700" />
+                          : <div className="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-600 text-lg">📦</div>
+                        }
+                      </td>
                       <td className="px-4 py-3 text-gray-500 font-mono text-xs">{p.referencia || '—'}</td>
                       <td className="px-4 py-3 font-medium text-white">{p.nombre}</td>
                       <td className="px-4 py-3 text-gray-400 text-xs">{p.categoria || '—'}</td>
@@ -442,13 +448,28 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
     nombre: '', referencia: '', descripcion: '', categoria: '',
     precio_venta: '', precio_compra: '', iva_tasa: 21,
     stock_actual: 0, stock_minimo: 0, unidad: 'ud',
-    proveedor_id: '', activo: true,
+    proveedor_id: '', activo: true, imagen_url: '',
     ...producto,
     empresa_id: empresaId,
   })
   const [saving, setSaving] = useState(false)
+  const [uploadingImg, setUploadingImg] = useState(false)
 
   const f = (k) => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
+
+  const handleImagen = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 3 * 1024 * 1024) return alert('La imagen no puede superar 3 MB')
+    setUploadingImg(true)
+    const ext = file.name.split('.').pop()
+    const path = `${empresaId}/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from('productos').upload(path, file, { upsert: true })
+    if (upErr) { alert('Error al subir imagen: ' + upErr.message); setUploadingImg(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('productos').getPublicUrl(path)
+    setForm(p => ({ ...p, imagen_url: publicUrl }))
+    setUploadingImg(false)
+  }
 
   const handleSave = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
@@ -470,6 +491,41 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   return (
     <Modal title={esNuevo ? '+ Nuevo producto' : `✏️ ${producto.nombre}`} onClose={onClose}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+        {/* Imagen del producto — PRIMERO */}
+        <div className="md:col-span-2">
+          <label className="label">Foto del producto</label>
+          <div className="flex items-center gap-4 p-3 rounded-lg" style={{ background: 'rgba(201,168,76,0.05)', border: '1px solid #2a2418' }}>
+            {form.imagen_url ? (
+              <div className="relative flex-shrink-0">
+                <img src={form.imagen_url} alt="Producto"
+                  className="w-20 h-20 object-cover rounded-lg border border-gray-700" />
+                <button type="button"
+                  onClick={() => setForm(p => ({ ...p, imagen_url: '' }))}
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center hover:bg-red-500 font-bold">
+                  ×
+                </button>
+              </div>
+            ) : (
+              <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-700 flex items-center justify-center text-gray-600 flex-shrink-0 bg-gray-800/50">
+                <span className="text-2xl">📷</span>
+              </div>
+            )}
+            <div>
+              <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                style={{ background: 'rgba(201,168,76,0.15)', color: '#C9A84C', border: '1px solid rgba(201,168,76,0.3)' }}>
+                {uploadingImg
+                  ? <><span className="animate-pulse">⏳</span> Subiendo...</>
+                  : <>{form.imagen_url ? '🔄 Cambiar foto' : '📷 Subir foto'}</>
+                }
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden" onChange={handleImagen} disabled={uploadingImg} />
+              </label>
+              <p className="text-xs text-gray-600 mt-1.5">JPG, PNG o WebP · máx. 3 MB</p>
+            </div>
+          </div>
+        </div>
+
         <div className="md:col-span-2">
           <label className="label">Nombre *</label>
           <input className="input" placeholder="Ej: Trofeo 35cm personalizable" {...f('nombre')} />
