@@ -26,6 +26,7 @@ export default function Stock({ session }) {
   const [modalAjuste, setModalAjuste]     = useState(null)
   const [modalCompra, setModalCompra]     = useState(false)
   const [compras, setCompras]             = useState([])
+  const [imagenAmpliada, setImagenAmpliada] = useState(null)
 
   useEffect(() => {
     const init = async () => {
@@ -168,7 +169,9 @@ export default function Stock({ session }) {
                     <tr key={p.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
                       <td className="px-3 py-2 w-12">
                         {p.imagen_url
-                          ? <img src={p.imagen_url} alt={p.nombre} className="w-10 h-10 object-cover rounded-lg border border-gray-700" />
+                          ? <img src={p.imagen_url} alt={p.nombre}
+                              onClick={() => setImagenAmpliada(p.imagen_url)}
+                              className="w-10 h-10 object-cover rounded-lg border border-gray-700 cursor-zoom-in hover:opacity-80 transition-opacity" />
                           : <div className="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-600 text-lg">📦</div>
                         }
                       </td>
@@ -437,6 +440,23 @@ export default function Stock({ session }) {
           onSaved={() => { setModalAjuste(null); cargar(empresa.id) }}
         />
       )}
+
+      {/* ── LIGHTBOX IMAGEN ───────────────────────────── */}
+      {imagenAmpliada && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          onClick={() => setImagenAmpliada(null)}>
+          <div className="absolute inset-0 bg-black/90" />
+          <div className="relative z-10 flex flex-col items-center gap-3">
+            <img src={imagenAmpliada} alt="Producto"
+              className="max-w-[90vw] max-h-[80vh] object-contain rounded-xl shadow-2xl border border-gray-700" />
+            <button onClick={() => setImagenAmpliada(null)}
+              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              ✕ Cerrar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -454,6 +474,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   })
   const [saving, setSaving] = useState(false)
   const [uploadingImg, setUploadingImg] = useState(false)
+  const [verImagen, setVerImagen] = useState(false)
 
   const f = (k) => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
 
@@ -482,6 +503,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
       stock_actual:  Number(form.stock_actual)  || 0,
       stock_minimo:  Number(form.stock_minimo)  || 0,
       proveedor_id:  form.proveedor_id || null,
+      imagen_url:    form.imagen_url || null,
     }
     await upsertProducto(payload)
     setSaving(false)
@@ -489,29 +511,34 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   }
 
   return (
+    <>
     <Modal title={esNuevo ? '+ Nuevo producto' : `✏️ ${producto.nombre}`} onClose={onClose}>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-        {/* Imagen del producto — PRIMERO */}
+        {/* Imagen del producto */}
         <div className="md:col-span-2">
           <label className="label">Foto del producto</label>
           <div className="flex items-center gap-4 p-3 rounded-lg" style={{ background: 'rgba(201,168,76,0.05)', border: '1px solid #2a2418' }}>
             {form.imagen_url ? (
-              <div className="relative flex-shrink-0">
+              <div className="relative flex-shrink-0 group">
                 <img src={form.imagen_url} alt="Producto"
-                  className="w-20 h-20 object-cover rounded-lg border border-gray-700" />
+                  onClick={() => setVerImagen(true)}
+                  className="w-24 h-24 object-cover rounded-lg border border-gray-700 cursor-zoom-in transition-opacity group-hover:opacity-80" />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded-lg bg-black/40">
+                  <span className="text-white text-xs font-bold">🔍 Ver</span>
+                </div>
                 <button type="button"
                   onClick={() => setForm(p => ({ ...p, imagen_url: '' }))}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center hover:bg-red-500 font-bold">
+                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center hover:bg-red-500 font-bold z-10">
                   ×
                 </button>
               </div>
             ) : (
-              <div className="w-20 h-20 rounded-lg border-2 border-dashed border-gray-700 flex items-center justify-center text-gray-600 flex-shrink-0 bg-gray-800/50">
-                <span className="text-2xl">📷</span>
+              <div className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-700 flex items-center justify-center text-gray-600 flex-shrink-0 bg-gray-800/50">
+                <span className="text-3xl">📷</span>
               </div>
             )}
-            <div>
+            <div className="flex flex-col gap-2">
               <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
                 style={{ background: 'rgba(201,168,76,0.15)', color: '#C9A84C', border: '1px solid rgba(201,168,76,0.3)' }}>
                 {uploadingImg
@@ -521,7 +548,13 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
                 <input type="file" accept="image/jpeg,image/png,image/webp,image/gif"
                   className="hidden" onChange={handleImagen} disabled={uploadingImg} />
               </label>
-              <p className="text-xs text-gray-600 mt-1.5">JPG, PNG o WebP · máx. 3 MB</p>
+              {form.imagen_url && (
+                <button type="button" onClick={() => setVerImagen(true)}
+                  className="text-xs text-gray-400 hover:text-white underline text-left">
+                  🔍 Ver tamaño completo
+                </button>
+              )}
+              <p className="text-xs text-gray-600">JPG, PNG o WebP · máx. 3 MB</p>
             </div>
           </div>
         </div>
@@ -592,6 +625,24 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
         </button>
       </div>
     </Modal>
+
+    {/* Lightbox FUERA del Modal para evitar overflow-hidden */}
+    {verImagen && form.imagen_url && (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+        onClick={() => setVerImagen(false)}>
+        <div className="absolute inset-0 bg-black/92" />
+        <div className="relative z-10 flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
+          <img src={form.imagen_url} alt="Producto"
+            className="max-w-[90vw] max-h-[80vh] object-contain rounded-xl shadow-2xl border border-gray-700" />
+          <button onClick={() => setVerImagen(false)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)' }}>
+            ✕ Cerrar
+          </button>
+        </div>
+      </div>
+    )}
+  </>
   )
 }
 
