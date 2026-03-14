@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          getProveedores, upsertProveedor, deleteProveedor,
          getMovimientos, entradaStock, ajusteStock,
@@ -441,21 +442,21 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── LIGHTBOX IMAGEN ───────────────────────────── */}
-      {imagenAmpliada && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      {/* ── LIGHTBOX IMAGEN (lista) ───────────────────── */}
+      {imagenAmpliada && createPortal(
+        <div className="fixed inset-0 flex items-center justify-center p-4"
+          style={{ zIndex: 9999, background: 'rgba(0,0,0,0.92)' }}
           onClick={() => setImagenAmpliada(null)}>
-          <div className="absolute inset-0 bg-black/90" />
-          <div className="relative z-10 flex flex-col items-center gap-3">
+          <div className="relative flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
             <img src={imagenAmpliada} alt="Producto"
-              className="max-w-[90vw] max-h-[80vh] object-contain rounded-xl shadow-2xl border border-gray-700" />
+              style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '12px', border: '1px solid #374151' }} />
             <button onClick={() => setImagenAmpliada(null)}
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-              style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '8px 20px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
               ✕ Cerrar
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -495,8 +496,10 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   const handleSave = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
     setSaving(true)
+    // Limpiar campos del join (proveedores) que no pertenecen a la tabla
+    const { proveedores: _, ...formLimpio } = form
     const payload = {
-      ...form,
+      ...formLimpio,
       precio_venta:  Number(form.precio_venta)  || 0,
       precio_compra: Number(form.precio_compra) || 0,
       iva_tasa:      Number(form.iva_tasa)      || 21,
@@ -505,7 +508,8 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
       proveedor_id:  form.proveedor_id || null,
       imagen_url:    form.imagen_url || null,
     }
-    await upsertProducto(payload)
+    const { error } = await upsertProducto(payload)
+    if (error) { alert('Error al guardar: ' + error.message); setSaving(false); return }
     setSaving(false)
     onSaved()
   }
@@ -626,21 +630,21 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
       </div>
     </Modal>
 
-    {/* Lightbox FUERA del Modal para evitar overflow-hidden */}
-    {verImagen && form.imagen_url && (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+    {/* Lightbox via Portal — se renderiza en body, sin overflow-hidden */}
+    {verImagen && form.imagen_url && createPortal(
+      <div className="fixed inset-0 flex items-center justify-center p-4"
+        style={{ zIndex: 9999, background: 'rgba(0,0,0,0.92)' }}
         onClick={() => setVerImagen(false)}>
-        <div className="absolute inset-0 bg-black/92" />
-        <div className="relative z-10 flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
+        <div className="relative flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
           <img src={form.imagen_url} alt="Producto"
-            className="max-w-[90vw] max-h-[80vh] object-contain rounded-xl shadow-2xl border border-gray-700" />
+            style={{ maxWidth: '90vw', maxHeight: '80vh', objectFit: 'contain', borderRadius: '12px', border: '1px solid #374151' }} />
           <button onClick={() => setVerImagen(false)}
-            className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)' }}>
+            style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)', color: 'white', padding: '8px 20px', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' }}>
             ✕ Cerrar
           </button>
         </div>
-      </div>
+      </div>,
+      document.body
     )}
   </>
   )
