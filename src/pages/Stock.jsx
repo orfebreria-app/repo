@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          getProveedores, upsertProveedor, deleteProveedor,
@@ -28,6 +28,7 @@ export default function Stock({ session }) {
   const [modalCompra, setModalCompra]     = useState(false)
   const [compras, setCompras]             = useState([])
   const [imagenAmpliada, setImagenAmpliada] = useState(null)
+  const [seccionesAbiertas, setSeccionesAbiertas] = useState({})
 
   useEffect(() => {
     const init = async () => {
@@ -149,78 +150,149 @@ export default function Stock({ session }) {
             ))}
           </div>
 
-          {/* Tabla */}
-          <div className="card p-0 overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid #2a2418' }}>
-                  {['', 'Referencia', 'Producto', 'Categoría', 'Proveedor', 'Precio venta', 'Stock', 'Acciones'].map(h => (
-                    <th key={h} className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wide font-semibold">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {productosFiltrados.length === 0 && (
-                  <tr><td colSpan={8} className="text-center py-12 text-gray-600">No hay productos. Crea el primero →</td></tr>
-                )}
-                {productosFiltrados.map(p => {
-                  const bajo = p.stock_actual <= p.stock_minimo && p.stock_minimo > 0
-                  const sinStock = p.stock_actual <= 0
+          {/* Secciones por prefijo de referencia */}
+          {(() => {
+            // Extraer prefijo: "TIENDA-001" → "TIENDA", "TRO 35" → "TRO", "" → "Sin sección"
+            const getSeccion = (ref) => {
+              if (!ref || !ref.trim()) return '📂 Sin sección'
+              const partes = ref.trim().toUpperCase().split(/[-_\s\/]+/)
+              return partes[0] || '📂 Sin sección'
+            }
+
+            // Agrupar
+            const grupos = {}
+            productosFiltrados.forEach(p => {
+              const sec = getSeccion(p.referencia)
+              if (!grupos[sec]) grupos[sec] = []
+              grupos[sec].push(p)
+            })
+
+            const secciones = Object.keys(grupos).sort((a, b) => {
+              if (a === '📂 Sin sección') return 1
+              if (b === '📂 Sin sección') return -1
+              return a.localeCompare(b)
+            })
+
+            if (secciones.length === 0) return (
+              <div className="card text-center py-12 text-gray-600">No hay productos. Crea el primero →</div>
+            )
+
+            return (
+              <div className="space-y-2">
+                {/* Botón expandir/colapsar todo */}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => {
+                    const todas = {}
+                    secciones.forEach(s => todas[s] = true)
+                    setSeccionesAbiertas(todas)
+                  }} className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800">
+                    Expandir todo
+                  </button>
+                  <button onClick={() => setSeccionesAbiertas({})}
+                    className="text-xs text-gray-500 hover:text-gray-300 px-2 py-1 rounded hover:bg-gray-800">
+                    Colapsar todo
+                  </button>
+                </div>
+
+                {secciones.map(seccion => {
+                  const prods = grupos[seccion]
+                  const abierta = seccionesAbiertas[seccion] !== false // por defecto abierta
+                  const sinStockCount = prods.filter(p => p.stock_actual <= 0).length
+                  const bajoCount = prods.filter(p => p.stock_actual > 0 && p.stock_actual <= p.stock_minimo && p.stock_minimo > 0).length
+
                   return (
-                    <tr key={p.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
-                      <td className="px-3 py-2 w-12">
-                        {p.imagen_url
-                          ? <img src={p.imagen_url} alt={p.nombre}
-                              onClick={() => setImagenAmpliada(p.imagen_url)}
-                              className="w-10 h-10 object-cover rounded-lg border border-gray-700 cursor-zoom-in hover:opacity-80 transition-opacity" />
-                          : <div className="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-600 text-lg">📦</div>
-                        }
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">{p.referencia || '—'}</td>
-                      <td className="px-4 py-3 font-medium text-white">{p.nombre}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">{p.categoria || '—'}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs">{p.proveedores?.nombre || '—'}</td>
-                      <td className="px-4 py-3 text-white font-mono text-xs">{formatEuro(p.precio_venta)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-1 rounded-lg text-xs font-bold ${
-                          sinStock ? 'bg-red-900/50 text-red-400 border border-red-800' :
-                          bajo    ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800' :
-                                    'bg-green-900/30 text-green-400 border border-green-900'
-                        }`}>
-                          {p.stock_actual} {p.unidad}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex gap-1">
-                          <button onClick={() => setModalEntrada(p)}
-                            title="Entrada de stock"
-                            className="text-xs px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/60 border border-green-900 transition-colors">
-                            +
-                          </button>
-                          <button onClick={() => setModalAjuste(p)}
-                            title="Ajustar stock"
-                            className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700 transition-colors">
-                            ✏️
-                          </button>
-                          <button onClick={() => setModalProducto(p)}
-                            className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700 transition-colors">
-                            ⚙️
-                          </button>
-                          <button onClick={async () => {
-                            if (!confirm(`¿Eliminar "${p.nombre}"?`)) return
-                            await deleteProducto(p.id)
-                            await cargar(empresa.id)
-                          }} className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-900 transition-colors">
-                            🗑
-                          </button>
+                    <div key={seccion} className="rounded-xl overflow-hidden" style={{ border: '1px solid #2a2418' }}>
+                      {/* Cabecera de sección */}
+                      <button
+                        onClick={() => setSeccionesAbiertas(s => ({ ...s, [seccion]: !abierta }))}
+                        className="w-full flex items-center justify-between px-4 py-3 text-left transition-colors hover:bg-white/5"
+                        style={{ background: '#1a1814' }}>
+                        <div className="flex items-center gap-3">
+                          <span className="text-base" style={{ color: '#C9A84C' }}>{abierta ? '▼' : '▶'}</span>
+                          <span className="font-bold text-white text-sm tracking-wide">{seccion}</span>
+                          <span className="text-xs text-gray-500 font-normal">
+                            {prods.length} {prods.length === 1 ? 'artículo' : 'artículos'}
+                          </span>
+                          {sinStockCount > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-red-900/50 text-red-400 border border-red-800">
+                              {sinStockCount} sin stock
+                            </span>
+                          )}
+                          {bajoCount > 0 && (
+                            <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-yellow-900/40 text-yellow-400 border border-yellow-800">
+                              {bajoCount} bajo
+                            </span>
+                          )}
                         </div>
-                      </td>
-                    </tr>
+                        <span className="text-xs text-gray-600 font-mono">
+                          {formatEuro(prods.reduce((s, p) => s + p.stock_actual * p.precio_compra, 0))}
+                        </span>
+                      </button>
+
+                      {/* Filas de productos */}
+                      {abierta && (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr style={{ borderTop: '1px solid #2a2418', borderBottom: '1px solid #2a2418', background: '#161410' }}>
+                              {['', 'Referencia', 'Producto', 'Categoría', 'Proveedor', 'Precio venta', 'Stock', 'Acciones'].map(h => (
+                                <th key={h} className="text-left px-4 py-2 text-xs text-gray-600 uppercase tracking-wide font-semibold">{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {prods.map(p => {
+                              const bajo = p.stock_actual <= p.stock_minimo && p.stock_minimo > 0
+                              const sinStock = p.stock_actual <= 0
+                              return (
+                                <tr key={p.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
+                                  <td className="px-3 py-2 w-12">
+                                    {p.imagen_url
+                                      ? <img src={p.imagen_url} alt={p.nombre}
+                                          onClick={() => setImagenAmpliada(p.imagen_url)}
+                                          className="w-10 h-10 object-cover rounded-lg border border-gray-700 cursor-zoom-in hover:opacity-80 transition-opacity" />
+                                      : <div className="w-10 h-10 rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center text-gray-600 text-lg">📦</div>
+                                    }
+                                  </td>
+                                  <td className="px-4 py-3 text-gray-500 font-mono text-xs">{p.referencia || '—'}</td>
+                                  <td className="px-4 py-3 font-medium text-white">{p.nombre}</td>
+                                  <td className="px-4 py-3 text-gray-400 text-xs">{p.categoria || '—'}</td>
+                                  <td className="px-4 py-3 text-gray-400 text-xs">{p.proveedores?.nombre || '—'}</td>
+                                  <td className="px-4 py-3 text-white font-mono text-xs">{formatEuro(p.precio_venta)}</td>
+                                  <td className="px-4 py-3">
+                                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${
+                                      sinStock ? 'bg-red-900/50 text-red-400 border border-red-800' :
+                                      bajo     ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-800' :
+                                                 'bg-green-900/30 text-green-400 border border-green-900'
+                                    }`}>
+                                      {p.stock_actual} {p.unidad}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <div className="flex gap-1">
+                                      <button onClick={() => setModalEntrada(p)} title="Entrada de stock"
+                                        className="text-xs px-2 py-1 rounded bg-green-900/30 text-green-400 hover:bg-green-900/60 border border-green-900 transition-colors">+</button>
+                                      <button onClick={() => setModalAjuste(p)} title="Ajustar stock"
+                                        className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700 transition-colors">✏️</button>
+                                      <button onClick={() => setModalProducto(p)}
+                                        className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700 transition-colors">⚙️</button>
+                                      <button onClick={async () => {
+                                        if (!confirm(`¿Eliminar "${p.nombre}"?`)) return
+                                        await deleteProducto(p.id); await cargar(empresa.id)
+                                      }} className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-900 transition-colors">🗑</button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -1173,3 +1245,5 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
     </Modal>
   )
 }
+
+// v-secciones
