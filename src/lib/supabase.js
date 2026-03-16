@@ -327,7 +327,7 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
     await supabase.from('vencimientos_factura_proveedor').insert(plazos)
   }
 
-  // Sumar stock de productos vinculados
+  // Sumar stock de productos vinculados y actualizar precio de compra
   for (const linea of lineas.filter(l => l.producto_id)) {
     const { data: prod } = await supabase
       .from('productos')
@@ -337,7 +337,10 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
     if (!prod) continue
     const anterior  = Number(prod.stock_actual)
     const posterior = anterior + Number(linea.cantidad)
-    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', linea.producto_id)
+    await supabase.from('productos').update({
+      stock_actual:  posterior,
+      precio_compra: Number(linea.precio_unitario), // ← actualizar precio compra
+    }).eq('id', linea.producto_id)
     await supabase.from('movimientos_stock').insert({
       empresa_id: factura.empresa_id, producto_id: linea.producto_id,
       tipo: 'entrada', cantidad: Number(linea.cantidad),

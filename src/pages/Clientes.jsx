@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
-import { getEmpresa, getClientes, upsertCliente, deleteCliente } from '../lib/supabase'
+import { supabase, getEmpresa, getClientes, upsertCliente, deleteCliente, formatEuro, formatFecha } from '../lib/supabase'
 
 const empty = { nombre:'', nif_cif:'', email:'', telefono:'', direccion:'', ciudad:'', cp:'', pais:'España' }
 
 export default function Clientes({ session }) {
-  const [empresa, setEmpresa]   = useState(null)
-  const [clientes, setClientes] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [modal, setModal]       = useState(false)
-  const [form, setForm]         = useState(empty)
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
-  const [buscar, setBuscar]     = useState('')
+  const [empresa, setEmpresa]       = useState(null)
+  const [clientes, setClientes]     = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [modal, setModal]           = useState(false)
+  const [form, setForm]             = useState(empty)
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState('')
+  const [buscar, setBuscar]         = useState('')
+  const [clienteHistorial, setClienteHistorial] = useState(null)
+  const [historial, setHistorial]   = useState(null) // null = cargando
 
   const cargar = async (emp) => {
     const { data } = await getClientes(emp.id)
@@ -31,6 +33,21 @@ export default function Clientes({ session }) {
   const openNew  = () => { setForm(empty); setError(''); setModal(true) }
   const openEdit = (c) => { setForm(c); setError(''); setModal(true) }
   const closeModal = () => setModal(false)
+
+  const openHistorial = async (c) => {
+    setClienteHistorial(c)
+    setHistorial(null)
+    // Cargar facturas y tickets del cliente
+    const [{ data: facts }, { data: ticks }] = await Promise.all([
+      supabase.from('facturas').select('id, folio, fecha_emision, estado, total')
+        .eq('cliente_id', c.id).order('fecha_emision', { ascending: false }),
+      supabase.from('tickets').select('id, creado_en, total, metodo_pago')
+        .eq('empresa_id', empresa.id)
+        .order('creado_en', { ascending: false })
+        .limit(20),
+    ])
+    setHistorial({ facturas: facts || [], tickets: ticks || [] })
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -99,6 +116,10 @@ export default function Clientes({ session }) {
                   <td className="py-3 px-4 text-gray-400 text-xs">{c.telefono || '—'}</td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex gap-2 justify-end">
+                      <button onClick={() => openHistorial(c)}
+                        className="text-xs text-gray-500 hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
+                        📋 Historial
+                      </button>
                       <button onClick={() => openEdit(c)} className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">Editar</button>
                       <button onClick={() => handleDelete(c.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
                     </div>
@@ -110,16 +131,15 @@ export default function Clientes({ session }) {
         )}
       </div>
 
+      {/* Modal editar/nuevo */}
       {modal && (
         <Modal title={form.id ? 'Editar cliente' : 'Nuevo cliente'} onClose={closeModal}>
           <form onSubmit={handleSave} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
-
               <div className="col-span-2">
                 <label className="label">Nombre / Razón social *</label>
                 <input className="input" value={form.nombre || ''} onChange={e => setForm({...form, nombre: e.target.value})} required />
               </div>
-
               <div>
                 <label className="label">NIF / CIF</label>
                 <input className="input" value={form.nif_cif || ''} onChange={e => setForm({...form, nif_cif: e.target.value})} />
@@ -128,7 +148,6 @@ export default function Clientes({ session }) {
                 <label className="label">Email</label>
                 <input className="input" type="email" value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} />
               </div>
-
               <div>
                 <label className="label">Teléfono</label>
                 <input className="input" value={form.telefono || ''} onChange={e => setForm({...form, telefono: e.target.value})} />
@@ -137,7 +156,6 @@ export default function Clientes({ session }) {
                 <label className="label">Ciudad</label>
                 <input className="input" value={form.ciudad || ''} onChange={e => setForm({...form, ciudad: e.target.value})} />
               </div>
-
               <div>
                 <label className="label">Código Postal</label>
                 <input className="input" placeholder="28001" maxLength={10} value={form.cp || ''} onChange={e => setForm({...form, cp: e.target.value})} />
@@ -146,12 +164,10 @@ export default function Clientes({ session }) {
                 <label className="label">País</label>
                 <input className="input" placeholder="España" value={form.pais || ''} onChange={e => setForm({...form, pais: e.target.value})} />
               </div>
-
               <div className="col-span-2">
                 <label className="label">Dirección</label>
                 <input className="input" placeholder="Calle, número, piso..." value={form.direccion || ''} onChange={e => setForm({...form, direccion: e.target.value})} />
               </div>
-
               <div className="col-span-2">
                 <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg border transition-all"
                   style={{ borderColor: form.recargo_equivalencia ? 'rgba(201,168,76,0.5)' : '#374151', background: form.recargo_equivalencia ? 'rgba(201,168,76,0.08)' : 'transparent' }}>
@@ -164,7 +180,6 @@ export default function Clientes({ session }) {
                   </div>
                 </label>
               </div>
-
             </div>
             {error && <p className="text-red-400 text-sm">{error}</p>}
             <div className="flex justify-end gap-3 pt-1">
@@ -172,6 +187,72 @@ export default function Clientes({ session }) {
               <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {/* Modal historial cliente */}
+      {clienteHistorial && (
+        <Modal title={`📋 Historial — ${clienteHistorial.nombre}`} onClose={() => { setClienteHistorial(null); setHistorial(null) }} wide>
+          {historial === null ? (
+            <div className="text-center py-8 text-gray-500">Cargando...</div>
+          ) : (
+            <div className="space-y-5">
+              {/* KPIs */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="card text-center py-3">
+                  <div className="text-xl font-bold text-white">{historial.facturas.length}</div>
+                  <div className="text-xs text-gray-500">Facturas</div>
+                </div>
+                <div className="card text-center py-3">
+                  <div className="text-xl font-bold" style={{ color: '#C9A84C' }}>
+                    {formatEuro(historial.facturas.reduce((s, f) => s + Number(f.total), 0))}
+                  </div>
+                  <div className="text-xs text-gray-500">Total facturado</div>
+                </div>
+                <div className="card text-center py-3">
+                  <div className="text-xl font-bold text-white">
+                    {historial.facturas.filter(f => f.estado === 'pendiente').length}
+                  </div>
+                  <div className="text-xs text-gray-500">Pendientes de cobro</div>
+                </div>
+              </div>
+
+              {/* Facturas */}
+              <div>
+                <h3 className="font-semibold text-white mb-2 text-sm">🧾 Facturas</h3>
+                {historial.facturas.length === 0 ? (
+                  <p className="text-sm text-gray-600">Sin facturas</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-800">
+                        <th className="text-left py-2 px-3 text-xs text-gray-500">Nº</th>
+                        <th className="text-left py-2 px-3 text-xs text-gray-500">Fecha</th>
+                        <th className="text-left py-2 px-3 text-xs text-gray-500">Estado</th>
+                        <th className="text-right py-2 px-3 text-xs text-gray-500">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {historial.facturas.map(f => (
+                        <tr key={f.id} className="border-b border-gray-800/50 hover:bg-white/5">
+                          <td className="py-2 px-3 font-mono text-xs text-gray-300">{f.folio}</td>
+                          <td className="py-2 px-3 text-xs text-gray-400">{formatFecha(f.fecha_emision)}</td>
+                          <td className="py-2 px-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              f.estado === 'cobrada' ? 'bg-green-900/40 text-green-400' :
+                              f.estado === 'pendiente' ? 'bg-yellow-900/40 text-yellow-400' :
+                              'bg-gray-800 text-gray-400'
+                            }`}>{f.estado}</span>
+                          </td>
+                          <td className="py-2 px-3 text-right font-mono text-sm font-bold text-white">{formatEuro(f.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
         </Modal>
       )}
     </div>
@@ -182,11 +263,11 @@ const Th = ({ children }) => (
   <th className="text-left py-3 px-4 text-xs text-gray-500 font-semibold uppercase tracking-wide">{children}</th>
 )
 
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, wide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl overflow-y-auto max-h-screen">
+      <div className={`relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] ${wide ? 'max-w-2xl' : 'max-w-lg'}`}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>

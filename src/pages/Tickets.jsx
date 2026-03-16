@@ -278,6 +278,10 @@ export default function Tickets({ session }) {
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${tab==='historial' ? 'bg-brand-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
             📋 Historial
           </button>
+          <button onClick={() => { setTab('diaria'); cargarHistorial(empresa?.id) }}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${tab==='diaria' ? 'bg-brand-500 text-gray-950' : 'bg-gray-800 text-gray-400 hover:text-white'}`}>
+            📊 Caja diaria
+          </button>
         </div>
       </div>
 
@@ -627,6 +631,123 @@ export default function Tickets({ session }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── TAB CAJA DIARIA ─────────────────────────── */}
+      {tab === 'diaria' && (
+        <CajaDiaria historial={historial} formatEuro={formatEuro} />
+      )}
+    </div>
+  )
+}
+
+function CajaDiaria({ historial, formatEuro }) {
+  const [fecha, setFecha] = useState(new Date().toISOString().slice(0, 10))
+
+  const ticketsDia = historial.filter(t => {
+    const d = new Date(t.creado_en).toISOString().slice(0, 10)
+    return d === fecha
+  })
+
+  const totalDia     = ticketsDia.reduce((s, t) => s + Number(t.total), 0)
+  const totalEfectivo = ticketsDia.filter(t => t.metodo_pago === 'efectivo').reduce((s, t) => s + Number(t.total), 0)
+  const totalTarjeta  = ticketsDia.filter(t => t.metodo_pago === 'tarjeta').reduce((s, t) => s + Number(t.total), 0)
+  const totalBizum    = ticketsDia.filter(t => t.metodo_pago === 'bizum').reduce((s, t) => s + Number(t.total), 0)
+  const totalTransf   = ticketsDia.filter(t => t.metodo_pago === 'transferencia').reduce((s, t) => s + Number(t.total), 0)
+
+  // Agrupar artículos vendidos del día
+  const articulosDia = {}
+  ticketsDia.forEach(t => {
+    (t.lineas_ticket || []).forEach(l => {
+      const k = l.descripcion
+      if (!articulosDia[k]) articulosDia[k] = { cantidad: 0, total: 0 }
+      articulosDia[k].cantidad += Number(l.cantidad)
+      articulosDia[k].total   += Number(l.subtotal || 0)
+    })
+  })
+
+  return (
+    <div className="space-y-5">
+      {/* Selector fecha */}
+      <div className="flex items-center gap-4 flex-wrap">
+        <div>
+          <label className="label">Fecha</label>
+          <input type="date" className="input w-auto" value={fecha}
+            onChange={e => setFecha(e.target.value)} />
+        </div>
+        <button onClick={() => setFecha(new Date().toISOString().slice(0,10))}
+          className="btn-secondary text-sm mt-4">Hoy</button>
+        <button onClick={() => {
+          const d = new Date(fecha); d.setDate(d.getDate() - 1)
+          setFecha(d.toISOString().slice(0,10))
+        }} className="btn-secondary text-sm mt-4">← Ayer</button>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Total caja', valor: formatEuro(totalDia), icon: '💰', gold: true },
+          { label: 'Tickets', valor: ticketsDia.length, icon: '🧾' },
+          { label: 'Ticket medio', valor: ticketsDia.length ? formatEuro(totalDia / ticketsDia.length) : '—', icon: '📊' },
+          { label: 'Efectivo', valor: formatEuro(totalEfectivo), icon: '💵' },
+        ].map((k, i) => (
+          <div key={i} className="card text-center py-4">
+            <div className="text-2xl mb-1">{k.icon}</div>
+            <div className={`text-xl font-bold ${k.gold ? 'text-yellow-400' : 'text-white'}`}>{k.valor}</div>
+            <div className="text-xs text-gray-500 mt-0.5">{k.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desglose por forma de pago */}
+      <div className="card">
+        <h3 className="font-bold text-white mb-3">💳 Por forma de pago</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: 'Efectivo', valor: totalEfectivo, icon: '💵' },
+            { label: 'Tarjeta',  valor: totalTarjeta,  icon: '💳' },
+            { label: 'Bizum',    valor: totalBizum,    icon: '📱' },
+            { label: 'Transf.',  valor: totalTransf,   icon: '🏦' },
+          ].map((m, i) => (
+            <div key={i} className="rounded-lg p-3 text-center" style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+              <div className="text-xl mb-1">{m.icon}</div>
+              <div className="font-bold text-white">{formatEuro(m.valor)}</div>
+              <div className="text-xs text-gray-500">{m.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Artículos vendidos */}
+      {Object.keys(articulosDia).length > 0 && (
+        <div className="card">
+          <h3 className="font-bold text-white mb-3">📦 Artículos vendidos</h3>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800">
+                <th className="text-left py-2 px-3 text-xs text-gray-500 uppercase">Artículo</th>
+                <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">Uds.</th>
+                <th className="text-right py-2 px-3 text-xs text-gray-500 uppercase">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(articulosDia).sort((a,b) => b[1].total - a[1].total).map(([desc, dat]) => (
+                <tr key={desc} className="border-b border-gray-800/50 hover:bg-white/5">
+                  <td className="py-2 px-3 text-white">{desc}</td>
+                  <td className="py-2 px-3 text-right text-gray-400">{dat.cantidad}</td>
+                  <td className="py-2 px-3 text-right font-mono text-white">{formatEuro(dat.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {ticketsDia.length === 0 && (
+        <div className="card text-center py-12 text-gray-600">
+          <div className="text-4xl mb-3">📭</div>
+          <p>No hay tickets para esta fecha</p>
         </div>
       )}
     </div>

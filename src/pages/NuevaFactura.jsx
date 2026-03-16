@@ -167,15 +167,14 @@ export default function NuevaFactura({ session }) {
       <div className="card grid grid-cols-1 md:grid-cols-2 gap-5">
         <div className="md:col-span-2">
           <label className="label">Cliente *</label>
-          <select className="input" value={form.cliente_id}
-            onChange={e => {
-              const cli = clientes.find(c => c.id === e.target.value)
+          <BuscadorCliente
+            clientes={clientes}
+            clienteId={form.cliente_id}
+            onChange={(cli) => {
               setClienteRE(!!cli?.recargo_equivalencia)
-              setForm({...form, cliente_id: e.target.value})
-            }} required>
-            <option value="">— Selecciona un cliente —</option>
-            {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-          </select>
+              setForm({...form, cliente_id: cli?.id || ''})
+            }}
+          />
           {clientes.length === 0 && (
             <p className="text-xs text-yellow-500 mt-1">
               No tienes clientes. <button type="button" onClick={() => navigate('/clientes')} className="underline">Añade uno primero →</button>
@@ -365,3 +364,58 @@ const Skeleton = () => (
     <div className="h-32 bg-gray-800 rounded-xl" />
   </div>
 )
+
+function BuscadorCliente({ clientes, clienteId, onChange }) {
+  const [busq, setBusq] = useState('')
+  const [abierto, setAbierto] = useState(false)
+  const clienteActual = clientes.find(c => c.id === clienteId)
+
+  const filtrados = busq.length > 0
+    ? clientes.filter(c =>
+        c.nombre.toLowerCase().includes(busq.toLowerCase()) ||
+        (c.nif_cif||'').toLowerCase().includes(busq.toLowerCase()) ||
+        (c.email||'').toLowerCase().includes(busq.toLowerCase())
+      ).slice(0, 8)
+    : clientes.slice(0, 8)
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <input
+          className="input pr-8"
+          placeholder="🔍 Buscar cliente por nombre, NIF o email..."
+          value={abierto ? busq : (clienteActual?.nombre || '')}
+          onChange={e => { setBusq(e.target.value); setAbierto(true) }}
+          onFocus={() => { setBusq(''); setAbierto(true) }}
+          onBlur={() => setTimeout(() => setAbierto(false), 200)}
+        />
+        {clienteActual && !abierto && (
+          <button type="button" onClick={() => { onChange(null); setBusq('') }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-red-400 text-lg">×</button>
+        )}
+      </div>
+      {abierto && (
+        <div className="absolute top-full left-0 right-0 z-50 rounded-lg shadow-xl mt-1 overflow-hidden max-h-64 overflow-y-auto"
+          style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
+          {filtrados.length === 0
+            ? <div className="px-4 py-3 text-sm text-gray-500">Sin resultados</div>
+            : filtrados.map(c => (
+              <button key={c.id} type="button"
+                onMouseDown={() => { onChange(c); setBusq(''); setAbierto(false) }}
+                className="w-full text-left px-4 py-2.5 hover:bg-white/5 flex items-center justify-between gap-3 border-b"
+                style={{ borderColor: '#2a2418' }}>
+                <div>
+                  <div className="text-sm font-medium text-white flex items-center gap-2">
+                    {c.nombre}
+                    {c.recargo_equivalencia && <span className="text-xs px-1 rounded font-bold" style={{ background: 'rgba(201,168,76,0.15)', color: '#C9A84C' }}>RE</span>}
+                  </div>
+                  <div className="text-xs text-gray-500">{c.nif_cif || ''} {c.email ? `· ${c.email}` : ''}</div>
+                </div>
+              </button>
+            ))
+          }
+        </div>
+      )}
+    </div>
+  )
+}
