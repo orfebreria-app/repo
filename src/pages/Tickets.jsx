@@ -185,8 +185,20 @@ export default function Tickets({ session }) {
     const fecha = new Date(ticket.creado_en || ticket.fecha)
     const fechaStr = fecha.toLocaleDateString('es-ES')
     const horaStr  = fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-    const sep = '─'.repeat(32)
     const metodos = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum', transferencia: 'Transferencia' }
+
+    // Agrupar desglose IVA por tasa
+    const desgloseIva = {}
+    lineasTicket.forEach(l => {
+      const tasa = Number(l.iva_tasa || 0)
+      if (!desgloseIva[tasa]) desgloseIva[tasa] = { base: 0, iva: 0 }
+      const totalLinea = Number(l.subtotal || 0)
+      const divisor = 1 + tasa / 100
+      const base = +(totalLinea / divisor).toFixed(2)
+      const iva  = +(totalLinea - base).toFixed(2)
+      desgloseIva[tasa].base += base
+      desgloseIva[tasa].iva  += iva
+    })
 
     const html = `<!DOCTYPE html>
 <html>
@@ -205,13 +217,14 @@ export default function Tickets({ session }) {
   .center { text-align: center; }
   .right  { text-align: right; }
   .bold   { font-weight: bold; }
-  .sep    { border-top: 1px dashed #000; margin: 4px 0; }
-  .sep2   { border-top: 2px solid #000; margin: 4px 0; }
+  .sep    { border-top: 1px dashed #000; margin: 5px 0; }
+  .sep2   { border-top: 2px solid #000; margin: 5px 0; }
   .row    { display: flex; justify-content: space-between; margin: 2px 0; }
   .big    { font-size: 15px; font-weight: bold; }
   .xl     { font-size: 18px; font-weight: bold; }
-  .small  { font-size: 10px; color: #444; }
-  .art    { margin: 3px 0; }
+  .small  { font-size: 10px; color: #333; }
+  .art    { margin: 4px 0; }
+  .logo   { max-width: 60mm; max-height: 18mm; object-fit: contain; margin-bottom: 3px; }
   @media print {
     @page { size: 80mm auto; margin: 0; }
     body { width: 80mm; }
@@ -219,10 +232,12 @@ export default function Tickets({ session }) {
 </style>
 </head>
 <body>
+  ${empresa?.logo_url ? `<div class="center"><img src="${empresa.logo_url}" class="logo" /></div>` : ''}
   <div class="center bold big">${empresa?.nombre || 'Mi Empresa'}</div>
   ${empresa?.direccion ? `<div class="center small">${empresa.direccion}</div>` : ''}
   ${empresa?.nif_cif   ? `<div class="center small">NIF/CIF: ${empresa.nif_cif}</div>` : ''}
   ${empresa?.telefono  ? `<div class="center small">Tel: ${empresa.telefono}</div>` : ''}
+  <div class="center small">info@trofeosaka.es</div>
   <div class="sep2"></div>
 
   <div class="center bold">TICKET Nº ${String(ticket.numero).padStart(6,'0')}</div>
@@ -233,23 +248,31 @@ export default function Tickets({ session }) {
   <div class="art">
     <div class="bold">${l.descripcion}</div>
     <div class="row small">
-      <span>${l.cantidad} x ${fmt(l.precio_unitario)}</span>
+      <span>${l.cantidad} x ${fmt(l.precio_unitario)} <span style="color:#666">(IVA ${l.iva_tasa}% incl.)</span></span>
       <span class="bold">${fmt(l.subtotal)}</span>
     </div>
   </div>`).join('')}
 
   <div class="sep"></div>
-  <div class="row small"><span>Subtotal:</span><span>${fmt(ticket.subtotal)}</span></div>
-  <div class="row small"><span>IVA:</span><span>${fmt(ticket.iva_total)}</span></div>
+
+  ${Object.entries(desgloseIva).map(([tasa, d]) => `
+  <div class="row small">
+    <span>Base IVA ${tasa}%:</span><span>${fmt(d.base)}</span>
+  </div>
+  <div class="row small">
+    <span>IVA ${tasa}% (${fmt(d.iva)}):</span><span></span>
+  </div>`).join('')}
+
   ${ticket.recargo_total > 0 ? `<div class="row small"><span>Rec. Equiv.:</span><span>${fmt(ticket.recargo_total)}</span></div>` : ''}
   <div class="sep2"></div>
   <div class="row xl"><span>TOTAL:</span><span>${fmt(ticket.total)}</span></div>
+  <div class="center small" style="margin-top:2px">Precios IVA incluido</div>
   <div class="sep2"></div>
 
   <div class="row small"><span>Forma de pago:</span><span class="bold">${metodos[ticket.metodo_pago] || ticket.metodo_pago}</span></div>
   ${ticket.metodo_pago === 'efectivo' && ticket.efectivo_entregado ? `
   <div class="row small"><span>Entregado:</span><span>${fmt(ticket.efectivo_entregado)}</span></div>
-  <div class="row small bold"><span>Cambio:</span><span>${fmt(ticket.cambio || 0)}</span></div>` : ''}
+  <div class="row bold small"><span>Cambio:</span><span>${fmt(ticket.cambio || 0)}</span></div>` : ''}
 
   <div class="sep"></div>
   ${ticket.notas ? `<div class="center small">${ticket.notas}</div><br>` : ''}
