@@ -180,6 +180,95 @@ export default function Tickets({ session }) {
     doc.save(`ticket-${String(ticket.numero).padStart(6,'0')}.pdf`)
   }
 
+  const imprimirTicket = (ticket, lineasTicket) => {
+    const fmt = (n) => new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
+    const fecha = new Date(ticket.creado_en || ticket.fecha)
+    const fechaStr = fecha.toLocaleDateString('es-ES')
+    const horaStr  = fecha.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    const sep = '─'.repeat(32)
+    const metodos = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum', transferencia: 'Transferencia' }
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    width: 72mm;
+    padding: 4mm 3mm;
+    color: #000;
+    background: #fff;
+  }
+  .center { text-align: center; }
+  .right  { text-align: right; }
+  .bold   { font-weight: bold; }
+  .sep    { border-top: 1px dashed #000; margin: 4px 0; }
+  .sep2   { border-top: 2px solid #000; margin: 4px 0; }
+  .row    { display: flex; justify-content: space-between; margin: 2px 0; }
+  .big    { font-size: 15px; font-weight: bold; }
+  .xl     { font-size: 18px; font-weight: bold; }
+  .small  { font-size: 10px; color: #444; }
+  .art    { margin: 3px 0; }
+  @media print {
+    @page { size: 80mm auto; margin: 0; }
+    body { width: 80mm; }
+  }
+</style>
+</head>
+<body>
+  <div class="center bold big">${empresa?.nombre || 'Mi Empresa'}</div>
+  ${empresa?.direccion ? `<div class="center small">${empresa.direccion}</div>` : ''}
+  ${empresa?.nif_cif   ? `<div class="center small">NIF/CIF: ${empresa.nif_cif}</div>` : ''}
+  ${empresa?.telefono  ? `<div class="center small">Tel: ${empresa.telefono}</div>` : ''}
+  <div class="sep2"></div>
+
+  <div class="center bold">TICKET Nº ${String(ticket.numero).padStart(6,'0')}</div>
+  <div class="row small"><span>Fecha: ${fechaStr}</span><span>Hora: ${horaStr}</span></div>
+  <div class="sep"></div>
+
+  ${lineasTicket.map(l => `
+  <div class="art">
+    <div class="bold">${l.descripcion}</div>
+    <div class="row small">
+      <span>${l.cantidad} x ${fmt(l.precio_unitario)}</span>
+      <span class="bold">${fmt(l.subtotal)}</span>
+    </div>
+  </div>`).join('')}
+
+  <div class="sep"></div>
+  <div class="row small"><span>Subtotal:</span><span>${fmt(ticket.subtotal)}</span></div>
+  <div class="row small"><span>IVA:</span><span>${fmt(ticket.iva_total)}</span></div>
+  ${ticket.recargo_total > 0 ? `<div class="row small"><span>Rec. Equiv.:</span><span>${fmt(ticket.recargo_total)}</span></div>` : ''}
+  <div class="sep2"></div>
+  <div class="row xl"><span>TOTAL:</span><span>${fmt(ticket.total)}</span></div>
+  <div class="sep2"></div>
+
+  <div class="row small"><span>Forma de pago:</span><span class="bold">${metodos[ticket.metodo_pago] || ticket.metodo_pago}</span></div>
+  ${ticket.metodo_pago === 'efectivo' && ticket.efectivo_entregado ? `
+  <div class="row small"><span>Entregado:</span><span>${fmt(ticket.efectivo_entregado)}</span></div>
+  <div class="row small bold"><span>Cambio:</span><span>${fmt(ticket.cambio || 0)}</span></div>` : ''}
+
+  <div class="sep"></div>
+  ${ticket.notas ? `<div class="center small">${ticket.notas}</div><br>` : ''}
+  <div class="center bold">¡Gracias por su compra!</div>
+  <div class="center small">Conserve este ticket como justificante</div>
+  <br><br>
+</body>
+</html>`
+
+    const ventana = window.open('', '_blank', 'width=300,height=600')
+    ventana.document.write(html)
+    ventana.document.close()
+    ventana.focus()
+    setTimeout(() => {
+      ventana.print()
+      ventana.close()
+    }, 400)
+  }
+
   const abrirModalBorrar = (ticket) => {
     setModalBorrar(true)
     setClaveBorrar('')
@@ -250,8 +339,13 @@ export default function Tickets({ session }) {
           )}
         </div>
         <div className="flex flex-col gap-3">
-          <button onClick={() => descargarPDF(ticketOk, ticketOk.lineas_ticket)} className="btn-primary flex items-center justify-center gap-2 py-3">
-            🖨️ Descargar ticket PDF
+          <button onClick={() => imprimirTicket(ticketOk, ticketOk.lineas_ticket)}
+            className="btn-primary flex items-center justify-center gap-2 py-3 text-base"
+            style={{ background: 'linear-gradient(135deg,#C9A84C,#a8882e)', color: '#1a1400' }}>
+            🖨️ Imprimir ticket
+          </button>
+          <button onClick={() => descargarPDF(ticketOk, ticketOk.lineas_ticket)} className="btn-secondary flex items-center justify-center gap-2 py-2 text-sm">
+            📄 Descargar PDF
           </button>
           <button onClick={nuevaVenta} className="btn-secondary py-3">➕ Nueva venta</button>
         </div>
@@ -576,10 +670,18 @@ export default function Tickets({ session }) {
                         </td>
                         <td className="py-3 px-4 font-bold text-white">{formatEuro(t.total)}</td>
                         <td className="py-3 px-4" onClick={e => e.stopPropagation()}>
-                          <button onClick={() => descargarPDF(t, t.lineas_ticket || [])}
-                            className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">
-                            🖨️ PDF
-                          </button>
+                          <div className="flex gap-1">
+                            <button onClick={() => imprimirTicket(t, t.lineas_ticket || [])}
+                              className="text-xs text-gray-500 hover:text-green-400 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+                              title="Imprimir en TSC E200">
+                              🖨️
+                            </button>
+                            <button onClick={() => descargarPDF(t, t.lineas_ticket || [])}
+                              className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+                              title="Descargar PDF">
+                              📄
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
