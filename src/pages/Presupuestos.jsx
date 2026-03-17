@@ -31,6 +31,7 @@ export default function Presupuestos({ session }) {
   const [filtro,    setFiltro]    = useState('todos')
   const [buscar,    setBuscar]    = useState('')
   const [modal,     setModal]     = useState(false) // 'nuevo' | false
+  const [editando,  setEditando]  = useState(null)  // presupuesto completo a editar
   const [saving,    setSaving]    = useState(false)
   const [error,     setError]     = useState('')
 
@@ -82,6 +83,7 @@ export default function Presupuestos({ session }) {
     setForm({ cliente_id:'', fecha_emision:hoy, fecha_validez:format(addDays(new Date(),30),'yyyy-MM-dd'), estado:'borrador', notas:'', condiciones:cond })
     setLineas([lineaVacia()])
     setError('')
+    setEditando(null)
     setModal(true)
   }
 
@@ -112,6 +114,61 @@ export default function Presupuestos({ session }) {
   const handleEstado = async (id, estado) => {
     await supabase.from('presupuestos').update({ estado }).eq('id', id)
     await cargar(empresa)
+  }
+
+  const handleEdit = async (id) => {
+    const { data: pres } = await supabase
+      .from('presupuestos')
+      .select('*, conceptos_presupuesto(*)')
+      .eq('id', id).single()
+    if (!pres) return
+    setForm({
+      id: pres.id,
+      cliente_id:    pres.cliente_id,
+      fecha_emision: pres.fecha_emision,
+      fecha_validez: pres.fecha_validez || '',
+      estado:        pres.estado,
+      notas:         pres.notas || '',
+      condiciones:   pres.condiciones || '',
+    })
+    setLineas(pres.conceptos_presupuesto
+      .sort((a,b) => a.orden - b.orden)
+      .map(c => ({
+        _id:            c.id,
+        descripcion:    c.descripcion,
+        cantidad:       c.cantidad,
+        precio_unitario: c.precio_unitario,
+        iva_tasa:       c.iva_tasa,
+        descuento:      c.descuento || 0,
+      }))
+    )
+    setError('')
+    setEditando(pres)
+    setModal(true)
+  }
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault()
+    if (!form.cliente_id) return setError('Selecciona un cliente')
+    if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return setError('Completa todos los conceptos')
+    setSaving(true)
+    await supabase.from('presupuestos').update({
+      cliente_id: form.cliente_id,
+      fecha_emision: form.fecha_emision,
+      fecha_validez: form.fecha_validez || null,
+      estado: form.estado,
+      subtotal, iva_total: ivaTotal, total,
+      notas: form.notas || null,
+      condiciones: form.condiciones || null,
+    }).eq('id', editando.id)
+    await supabase.from('conceptos_presupuesto').delete().eq('presupuesto_id', editando.id)
+    await supabase.from('conceptos_presupuesto').insert(
+      lineas.map((l,i) => ({ presupuesto_id: editando.id, descripcion: l.descripcion, cantidad: Number(l.cantidad), precio_unitario: Number(l.precio_unitario), iva_tasa: Number(l.iva_tasa), descuento: Number(l.descuento), subtotal: calcLinea(l), orden: i }))
+    )
+    await cargar(empresa)
+    setSaving(false)
+    setModal(false)
+    setEditando(null)
   }
 
   const handleDelete = async (id) => {
@@ -203,6 +260,7 @@ export default function Presupuestos({ session }) {
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex gap-1 justify-end">
+                      <button onClick={() => handleEdit(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Editar">✏️</button>
                       <button onClick={() => handlePDF(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Descargar PDF">📥 PDF</button>
                       {p.estado === 'aceptado' && (
                         <button onClick={() => handleConvertir(p.id)} className="text-xs text-green-500 hover:text-green-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Convertir en factura">🧾 Facturar</button>
@@ -232,13 +290,13 @@ export default function Presupuestos({ session }) {
           <div className="relative bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-4xl shadow-2xl my-8">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
               <div>
-                <h3 className="text-lg font-bold text-white">Nuevo presupuesto</h3>
-                <p className="text-xs text-gray-500 mt-0.5">Nº {empresa?.serie_presupuesto||'PRE'}-{String(empresa?.siguiente_presupuesto||1).padStart(4,'0')}</p>
+                <h3 className="text-lg font-bold text-white">{editando ? `✏️ Editar ${editando.numero}` : 'Nuevo presupuesto'}</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{editando ? editando.numero : `Nº ${empresa?.serie_presupuesto||'PRE'}-${String(empresa?.siguiente_presupuesto||1).padStart(4,'0')}`}</p>
               </div>
               <button onClick={() => setModal(false)} className="text-gray-500 hover:text-white text-2xl">×</button>
             </div>
 
-            <form onSubmit={handleSave} className="p-6 space-y-6">
+            <form onSubmit={editando ? handleSaveEdit : handleSave} className="p-6 space-y-6">
               {/* Datos */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="md:col-span-2">
@@ -329,8 +387,8 @@ export default function Presupuestos({ session }) {
               {error && <p className="text-red-400 text-sm">⚠️ {error}</p>}
 
               <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setModal(false)} className="btn-secondary">Cancelar</button>
-                <button type="submit" className="btn-primary px-6" disabled={saving}>{saving ? 'Guardando...' : '💾 Guardar presupuesto'}</button>
+                <button type="button" onClick={() => { setModal(false); setEditando(null) }} className="btn-secondary">Cancelar</button>
+                <button type="submit" className="btn-primary px-6" disabled={saving}>{saving ? 'Guardando...' : (editando ? '💾 Guardar cambios' : '💾 Guardar presupuesto')}</button>
               </div>
             </form>
           </div>
