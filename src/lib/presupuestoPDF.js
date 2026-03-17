@@ -127,14 +127,18 @@ async function plantillaModerna(doc, { presupuesto, empresa, conceptos, rgb, log
   autoTable(doc, {
     startY: y,
     head: [['Descripción','Cant.','Precio unit.','IVA','Dto.','Importe']],
-    body: conceptos.map(c => [
-      c.descripcion,
-      Number(c.cantidad).toLocaleString('es-ES'),
-      fmt(c.precio_unitario),
-      `${c.iva_tasa}%`,
-      `${c.descuento||0}%`,
-      fmt(c.subtotal),
-    ]),
+    body: conceptos.map(c => {
+      const dto = Number(c.descuento || 0)
+      const bruto = +(Number(c.cantidad) * Number(c.precio_unitario)).toFixed(2)
+      return [
+        c.descripcion,
+        Number(c.cantidad).toLocaleString('es-ES'),
+        fmt(c.precio_unitario),
+        `${c.iva_tasa}%`,
+        dto > 0 ? `${dto}%` : '—',
+        fmt(c.subtotal),
+      ]
+    }),
     headStyles: { fillColor:[r,g,b], textColor:255, fontStyle:'bold', fontSize:9 },
     bodyStyles: { fontSize:9, textColor:[30,30,30] },
     alternateRowStyles: { fillColor:[248,249,250] },
@@ -245,11 +249,14 @@ async function plantillaClasica(doc, { presupuesto, empresa, conceptos, rgb, log
 
   autoTable(doc, {
     startY:y,
-    head:[['Descripción','Cant.','Precio unit.','IVA','Importe']],
-    body:conceptos.map(c=>[c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,fmt(c.subtotal)]),
+    head:[['Descripción','Cant.','Precio unit.','IVA','Dto.','Importe']],
+    body:conceptos.map(c=>{
+      const dto = Number(c.descuento||0)
+      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(c.subtotal)]
+    }),
     headStyles:{fillColor:[r,g,b],textColor:255,fontStyle:'bold',fontSize:9},
     bodyStyles:{fontSize:9},
-    columnStyles:{1:{halign:'right',cellWidth:18},2:{halign:'right',cellWidth:30},3:{halign:'right',cellWidth:15},4:{halign:'right',cellWidth:28,fontStyle:'bold'}},
+    columnStyles:{1:{halign:'right',cellWidth:16},2:{halign:'right',cellWidth:26},3:{halign:'right',cellWidth:13},4:{halign:'right',cellWidth:13},5:{halign:'right',cellWidth:26,fontStyle:'bold'}},
     margin:{left:M,right:M},
   })
 
@@ -318,11 +325,14 @@ async function plantillaMinimalista(doc, { presupuesto, empresa, conceptos, rgb,
 
   autoTable(doc, {
     startY:y,
-    head:[['Descripción','Cant.','P.Unit.','IVA','Importe']],
-    body:conceptos.map(c=>[c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,fmt(c.subtotal)]),
+    head:[['Descripción','Cant.','P.Unit.','IVA','Dto.','Importe']],
+    body:conceptos.map(c=>{
+      const dto = Number(c.descuento||0)
+      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(c.subtotal)]
+    }),
     headStyles:{fillColor:[255,255,255],textColor:[r,g,b],fontStyle:'bold',fontSize:8,lineWidth:0},
     bodyStyles:{fontSize:9,textColor:[40,40,40]},
-    columnStyles:{1:{halign:'right',cellWidth:16},2:{halign:'right',cellWidth:26},3:{halign:'right',cellWidth:14},4:{halign:'right',cellWidth:26,fontStyle:'bold'}},
+    columnStyles:{1:{halign:'right',cellWidth:14},2:{halign:'right',cellWidth:24},3:{halign:'right',cellWidth:12},4:{halign:'right',cellWidth:12},5:{halign:'right',cellWidth:24,fontStyle:'bold'}},
     margin:{left:M+5,right:M},
   })
 
