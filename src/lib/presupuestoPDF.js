@@ -129,14 +129,15 @@ async function plantillaModerna(doc, { presupuesto, empresa, conceptos, rgb, log
     head: [['Descripción','Cant.','Precio unit.','IVA','Dto.','Importe']],
     body: conceptos.map(c => {
       const dto = Number(c.descuento || 0)
-      const bruto = +(Number(c.cantidad) * Number(c.precio_unitario)).toFixed(2)
+      const base = +(Number(c.cantidad) * Number(c.precio_unitario)).toFixed(2)
+      const importe = +(base * (1 - dto / 100)).toFixed(2)
       return [
         c.descripcion,
         Number(c.cantidad).toLocaleString('es-ES'),
         fmt(c.precio_unitario),
         `${c.iva_tasa}%`,
         dto > 0 ? `${dto}%` : '—',
-        fmt(c.subtotal),
+        fmt(importe),
       ]
     }),
     headStyles: { fillColor:[r,g,b], textColor:255, fontStyle:'bold', fontSize:9 },
@@ -252,7 +253,9 @@ async function plantillaClasica(doc, { presupuesto, empresa, conceptos, rgb, log
     head:[['Descripción','Cant.','Precio unit.','IVA','Dto.','Importe']],
     body:conceptos.map(c=>{
       const dto = Number(c.descuento||0)
-      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(c.subtotal)]
+      const base = +(Number(c.cantidad)*Number(c.precio_unitario)).toFixed(2)
+      const importe = +(base*(1-dto/100)).toFixed(2)
+      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(importe)]
     }),
     headStyles:{fillColor:[r,g,b],textColor:255,fontStyle:'bold',fontSize:9},
     bodyStyles:{fontSize:9},
@@ -328,7 +331,9 @@ async function plantillaMinimalista(doc, { presupuesto, empresa, conceptos, rgb,
     head:[['Descripción','Cant.','P.Unit.','IVA','Dto.','Importe']],
     body:conceptos.map(c=>{
       const dto = Number(c.descuento||0)
-      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(c.subtotal)]
+      const base = +(Number(c.cantidad)*Number(c.precio_unitario)).toFixed(2)
+      const importe = +(base*(1-dto/100)).toFixed(2)
+      return [c.descripcion,Number(c.cantidad).toLocaleString('es-ES'),fmt(c.precio_unitario),`${c.iva_tasa}%`,dto>0?`${dto}%`:'—',fmt(importe)]
     }),
     headStyles:{fillColor:[255,255,255],textColor:[r,g,b],fontStyle:'bold',fontSize:8,lineWidth:0},
     bodyStyles:{fontSize:9,textColor:[40,40,40]},
