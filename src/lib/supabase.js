@@ -425,3 +425,19 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 
   return { error: null }
 }
+
+// ── Envío de email ─────────────────────────────────────
+export const enviarEmail = async ({ to, subject, html, fromName }) => {
+  try {
+    const res = await fetch('/api/send-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, html, fromName }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Error al enviar' }
+    return { ok: true }
+  } catch (err) {
+    return { error: err.message }
+  }
+}

@@ -4,6 +4,7 @@ import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
          updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
 import ModalPlantilla from '../components/ModalPlantilla'
+import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
 const ESTADOS = ['todos','borrador','emitida','pagada','vencida','cancelada']
 const badge = (e) => ({ pagada:'badge-pagada', emitida:'badge-emitida', borrador:'badge-borrador', vencida:'badge-vencida', cancelada:'badge-cancelada' }[e] || 'badge-borrador')
@@ -28,6 +29,7 @@ export default function Facturas({ session }) {
   const [buscar,      setBuscar]      = useState('')
   const [pdfFactura,  setPdfFactura]  = useState(null)
   const [editFactura, setEditFactura] = useState(null)
+  const [emailFactura, setEmailFactura] = useState(null)
 
   const sortFacturas = (arr) => [...(arr || [])].sort((a, b) => {
     const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
@@ -123,6 +125,11 @@ export default function Facturas({ session }) {
                         className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                         📥 PDF
                       </button>
+                      <button onClick={() => setEmailFactura(f)}
+                        className="text-xs text-gray-500 hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-gray-800"
+                        title="Enviar por email">
+                        📧
+                      </button>
                       <button onClick={() => handleDelete(f.id)}
                         className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                         🗑
@@ -150,6 +157,16 @@ export default function Facturas({ session }) {
           factura={editFactura} empresa={empresa}
           onClose={() => setEditFactura(null)}
           onSaved={() => { setEditFactura(null); cargar(empresa) }}
+        />
+      )}
+      {emailFactura && (
+        <ModalEnviarEmail
+          tipo="factura"
+          numero={emailFactura.folio}
+          clienteEmail={emailFactura.clientes?.email || ''}
+          clienteNombre={emailFactura.clientes?.nombre || ''}
+          empresaNombre={empresa?.nombre || 'Trofeos AKA'}
+          onClose={() => setEmailFactura(null)}
         />
       )}
     </div>

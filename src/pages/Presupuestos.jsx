@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase, getEmpresa, getClientes, formatEuro, formatFecha } from '../lib/supabase'
 import { generarPresupuestoPDF } from '../lib/presupuestoPDF'
 import { format, addDays } from 'date-fns'
+import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
 const ESTADOS = ['todos','borrador','enviado','aceptado','rechazado','caducado']
 const badge = (e) => ({
@@ -34,6 +35,7 @@ export default function Presupuestos({ session }) {
   const [editando,  setEditando]  = useState(null)  // presupuesto completo a editar
   const [saving,    setSaving]    = useState(false)
   const [error,     setError]     = useState('')
+  const [emailPres, setEmailPres] = useState(null)
 
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -262,6 +264,7 @@ export default function Presupuestos({ session }) {
                     <div className="flex gap-1 justify-end">
                       <button onClick={() => handleEdit(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Editar">✏️</button>
                       <button onClick={() => handlePDF(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Descargar PDF">📥 PDF</button>
+                      <button onClick={() => setEmailPres(p)} className="text-xs text-gray-500 hover:text-blue-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Enviar por email">📧</button>
                       {p.estado === 'aceptado' && (
                         <button onClick={() => handleConvertir(p.id)} className="text-xs text-green-500 hover:text-green-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Convertir en factura">🧾 Facturar</button>
                       )}
@@ -393,6 +396,17 @@ export default function Presupuestos({ session }) {
             </form>
           </div>
         </div>
+      )}
+
+      {emailPres && (
+        <ModalEnviarEmail
+          tipo="presupuesto"
+          numero={emailPres.numero}
+          clienteEmail={emailPres.clientes?.email || ''}
+          clienteNombre={emailPres.clientes?.nombre || ''}
+          empresaNombre={empresa?.nombre || 'Trofeos AKA'}
+          onClose={() => setEmailPres(null)}
+        />
       )}
     </div>
   )
