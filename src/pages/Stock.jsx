@@ -7,7 +7,7 @@ import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          updateEstadoFacturaProveedor, deleteFacturaProveedor,
          formatEuro, formatFecha } from '../lib/supabase'
 
-const TABS = ['📦 Productos', '🏭 Proveedores', '🧾 Compras', '📋 Movimientos']
+const TABS = ['📦 Productos', '🏭 Proveedores', '📚 Catálogos', '🧾 Compras', '📋 Movimientos']
 
 const CATEGORIAS = ['Trofeos', 'Medallas', 'Placas', 'Figuras', 'Copas', 'Peanas', 'Llaveros', 'Escudos', 'Material grabación', 'Otros']
 
@@ -85,7 +85,7 @@ export default function Stock({ session }) {
               + Nuevo proveedor
             </button>
           )}
-          {tab === 2 && (
+          {tab === 3 && (
             <button onClick={() => setModalCompra(true)} className="btn-primary flex items-center gap-2">
               + Nueva compra
             </button>
@@ -334,8 +334,13 @@ export default function Stock({ session }) {
         </div>
       )}
 
-      {/* ── TAB COMPRAS ───────────────────────────────── */}
+      {/* ── TAB CATÁLOGOS ─────────────────────────────── */}
       {tab === 2 && (
+        <TabCatalogos proveedores={proveedores} empresaId={empresa.id} supabase={supabase} />
+      )}
+
+      {/* ── TAB COMPRAS ───────────────────────────────── */}
+      {tab === 3 && (
         <div className="space-y-4">
           {/* KPIs compras */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -420,7 +425,7 @@ export default function Stock({ session }) {
       )}
 
       {/* ── TAB MOVIMIENTOS ───────────────────────────── */}
-      {tab === 3 && (
+      {tab === 4 && (
         <div className="card p-0 overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -1247,3 +1252,128 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
 }
 
 // v-secciones
+
+// ── Tab Catálogos ──────────────────────────────────────
+function TabCatalogos({ proveedores, empresaId, supabase }) {
+  const [catalogos,       setCatalogos]       = useState([])
+  const [uploading,       setUploading]       = useState(false)
+  const [filtroProveedor, setFiltroProveedor] = useState('')
+  const [loading,         setLoading]         = useState(true)
+
+  const cargar = async () => {
+    const { data } = await supabase
+      .from('catalogos_proveedor')
+      .select('*, proveedores(nombre)')
+      .eq('empresa_id', empresaId)
+      .order('creado_en', { ascending: false })
+    setCatalogos(data || [])
+    setLoading(false)
+  }
+
+  useState(() => { cargar() }, [])
+
+  const handleSubir = async (e, proveedorId) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.type !== 'application/pdf') return alert('Solo se admiten archivos PDF')
+    if (file.size > 20 * 1024 * 1024) return alert('El archivo no puede superar 20 MB')
+    setUploading(true)
+    const path = `${empresaId}/${proveedorId}/${Date.now()}_${file.name}`
+    const { error: upErr } = await supabase.storage.from('catalogos').upload(path, file, { upsert: false })
+    if (upErr) { alert('Error al subir: ' + upErr.message); setUploading(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('catalogos').getPublicUrl(path)
+    const kb = (file.size / 1024).toFixed(0)
+    const tam = kb > 1024 ? `${(kb/1024).toFixed(1)} MB` : `${kb} KB`
+    await supabase.from('catalogos_proveedor').insert({
+      empresa_id: empresaId, proveedor_id: proveedorId,
+      nombre: file.name.replace('.pdf',''), archivo_url: publicUrl, tamano: tam,
+    })
+    await cargar()
+    setUploading(false)
+  }
+
+  const handleEliminar = async (cat) => {
+    if (!confirm(`¿Eliminar "${cat.nombre}"?`)) return
+    await supabase.from('catalogos_proveedor').delete().eq('id', cat.id)
+    await cargar()
+  }
+
+  const filtrados = filtroProveedor
+    ? catalogos.filter(c => c.proveedor_id === filtroProveedor)
+    : catalogos
+
+  if (loading) return <div className="text-gray-500 text-sm p-4">Cargando catálogos...</div>
+
+  return (
+    <div className="space-y-5">
+      {/* Filtro y subir */}
+      <div className="flex gap-3 flex-wrap items-center justify-between">
+        <select className="input max-w-xs" value={filtroProveedor} onChange={e => setFiltroProveedor(e.target.value)}>
+          <option value="">Todos los proveedores</option>
+          {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+        </select>
+        <label className="btn-primary cursor-pointer flex items-center gap-2">
+          {uploading ? <>⏳ Subiendo...</> : <>📤 Subir catálogo PDF</>}
+          <input type="file" accept="application/pdf" className="hidden" disabled={uploading}
+            onChange={e => {
+              if (!filtroProveedor) { alert('Selecciona primero un proveedor para asignar el catálogo'); e.target.value=''; return }
+              handleSubir(e, filtroProveedor)
+            }} />
+        </label>
+      </div>
+
+      {!filtroProveedor && (
+        <div className="text-xs text-yellow-500 px-1">
+          💡 Selecciona un proveedor para subir un catálogo
+        </div>
+      )}
+
+      {/* Grid de catálogos por proveedor */}
+      {filtrados.length === 0 ? (
+        <div className="card text-center py-16 text-gray-600">
+          <div className="text-4xl mb-3">📚</div>
+          <p className="text-sm">No hay catálogos. Sube el primero seleccionando un proveedor.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {/* Agrupar por proveedor */}
+          {[...new Set(filtrados.map(c => c.proveedor_id))].map(provId => {
+            const prov = proveedores.find(p => p.id === provId)
+            const cats = filtrados.filter(c => c.proveedor_id === provId)
+            return (
+              <div key={provId}>
+                <h3 className="font-semibold text-white text-sm mb-2 flex items-center gap-2">
+                  <span style={{ color: '#C9A84C' }}>🏭</span>
+                  {prov?.nombre || 'Proveedor desconocido'}
+                  <span className="text-gray-600 font-normal">({cats.length})</span>
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {cats.map(cat => (
+                    <div key={cat.id} className="card p-4 flex flex-col gap-3 hover:bg-white/5 transition-colors group">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="text-3xl">📄</div>
+                        <button onClick={() => handleEliminar(cat)}
+                          className="text-gray-700 hover:text-red-400 text-lg leading-none opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                      </div>
+                      <div>
+                        <div className="font-medium text-white text-sm leading-tight">{cat.nombre}</div>
+                        {cat.tamano && <div className="text-xs text-gray-500 mt-0.5">{cat.tamano}</div>}
+                        <div className="text-xs text-gray-600 mt-0.5">
+                          {new Date(cat.creado_en).toLocaleDateString('es-ES')}
+                        </div>
+                      </div>
+                      <a href={cat.archivo_url} target="_blank" rel="noopener noreferrer"
+                        className="btn-primary text-center text-xs py-1.5 flex items-center justify-center gap-1">
+                        📖 Abrir catálogo
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
