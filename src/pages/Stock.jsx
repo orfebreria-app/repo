@@ -1270,7 +1270,7 @@ function TabCatalogos({ proveedores, empresaId, supabase }) {
     setLoading(false)
   }
 
-  useState(() => { cargar() }, [])
+  useEffect(() => { cargar() }, [])
 
   const handleSubir = async (e, proveedorId) => {
     const file = e.target.files?.[0]
