@@ -1278,18 +1278,40 @@ function TabCatalogos({ proveedores, empresaId, supabase }) {
     if (file.type !== 'application/pdf') return alert('Solo se admiten archivos PDF')
     if (file.size > 20 * 1024 * 1024) return alert('El archivo no puede superar 20 MB')
     setUploading(true)
-    const path = `${empresaId}/${proveedorId}/${Date.now()}_${file.name}`
-    const { error: upErr } = await supabase.storage.from('catalogos').upload(path, file, { upsert: false })
-    if (upErr) { alert('Error al subir: ' + upErr.message); setUploading(false); return }
-    const { data: { publicUrl } } = supabase.storage.from('catalogos').getPublicUrl(path)
+    const path = `${empresaId}/${proveedorId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+
+    const { data: upData, error: upErr } = await supabase.storage.from('catalogos').upload(path, file, { upsert: true })
+    if (upErr) {
+      alert('Error storage: ' + upErr.message)
+      setUploading(false)
+      e.target.value = ''
+      return
+    }
+
+    const { data: urlData } = supabase.storage.from('catalogos').getPublicUrl(path)
+    const publicUrl = urlData.publicUrl
+
     const kb = (file.size / 1024).toFixed(0)
     const tam = kb > 1024 ? `${(kb/1024).toFixed(1)} MB` : `${kb} KB`
-    await supabase.from('catalogos_proveedor').insert({
-      empresa_id: empresaId, proveedor_id: proveedorId,
-      nombre: file.name.replace('.pdf',''), archivo_url: publicUrl, tamano: tam,
+
+    const { error: dbErr } = await supabase.from('catalogos_proveedor').insert({
+      empresa_id:   empresaId,
+      proveedor_id: proveedorId,
+      nombre:       file.name.replace('.pdf','').replace(/_/g,' '),
+      archivo_url:  publicUrl,
+      tamano:       tam,
     })
+
+    if (dbErr) {
+      alert('Error base de datos: ' + dbErr.message)
+      setUploading(false)
+      e.target.value = ''
+      return
+    }
+
     await cargar()
     setUploading(false)
+    e.target.value = ''
   }
 
   const handleEliminar = async (cat) => {
