@@ -1276,7 +1276,7 @@ function TabCatalogos({ proveedores, empresaId, supabase }) {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.type !== 'application/pdf') return alert('Solo se admiten archivos PDF')
-    if (file.size > 20 * 1024 * 1024) return alert('El archivo no puede superar 20 MB')
+    if (file.size > 100 * 1024 * 1024) return alert('El archivo no puede superar 100 MB')
     setUploading(true)
     const path = `${empresaId}/${proveedorId}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
 
