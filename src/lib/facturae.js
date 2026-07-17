@@ -15,7 +15,16 @@ const fmtDate = (value) => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-export function buildFacturaEXML({ empresa, factura, cliente, conceptos }) {
+export function buildFacturaEVerificationText({ empresa, factura, cliente }) {
+  const invoiceRef = escapeXml(factura.folio || factura.id || '')
+  const issuerTaxId = escapeXml(empresa?.nif_cif || '')
+  const buyerTaxId = escapeXml(cliente?.nif_cif || '')
+  const issueDate = fmtDate(factura.fecha_emision)
+  const totalAmount = fmtNumber(factura.total)
+  return `FAC|${invoiceRef}|EM:${issuerTaxId}|CL:${buyerTaxId}|D:${issueDate}|T:${totalAmount}`
+}
+
+export function buildFacturaEXML({ empresa, factura, cliente, conceptos, certificadoIdentificador, facturaeVersion = '3.2' }) {
   const issueDate = fmtDate(factura.fecha_emision)
   const dueDate = fmtDate(factura.fecha_vencimiento)
   const totalAmount = fmtNumber(factura.total)
@@ -24,6 +33,10 @@ export function buildFacturaEXML({ empresa, factura, cliente, conceptos }) {
   const buyerTaxId = cliente?.nif_cif || ''
   const invoiceNumber = escapeXml(factura.folio || factura.id || '')
   const customerName = escapeXml(cliente?.nombre || '')
+  const customerAddress = escapeXml(cliente?.direccion || '')
+  const customerPostalCode = escapeXml(cliente?.cp || '')
+  const customerCity = escapeXml(cliente?.ciudad || '')
+  const customerCountry = escapeXml(cliente?.pais || 'España')
   const companyName = escapeXml(empresa?.nombre || '')
   const companyAddress = escapeXml(empresa?.direccion || '')
   const companyEmail = escapeXml(empresa?.email || '')
@@ -75,10 +88,13 @@ export function buildFacturaEXML({ empresa, factura, cliente, conceptos }) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Facturae xmlns="http://www.facturae.es/Facturae/2014/v3.2/Facturae" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <FileHeader>
-    <SchemaVersion>3.2</SchemaVersion>
+    <SchemaVersion>${escapeXml(facturaeVersion)}</SchemaVersion>
     <InvoiceIssuerType>EM</InvoiceIssuerType>
     <InvoiceIssueDate>${issueDate}</InvoiceIssueDate>
     <InvoiceCurrencyCode>${currency}</InvoiceCurrencyCode>
+    ${certificadoIdentificador ? `<Certification>
+      <CertificationIdentifier>${escapeXml(certificadoIdentificador)}</CertificationIdentifier>
+    </Certification>` : ''}
   </FileHeader>
   <Parties>
     <SellerParty>
@@ -104,6 +120,10 @@ export function buildFacturaEXML({ empresa, factura, cliente, conceptos }) {
       </TaxIdentification>
       <LegalEntity>
         <CorporateName>${customerName}</CorporateName>
+        ${customerAddress ? `<Address>${customerAddress}</Address>` : ''}
+        ${customerPostalCode ? `<PostCode>${customerPostalCode}</PostCode>` : ''}
+        ${customerCity ? `<Town>${customerCity}</Town>` : ''}
+        <CountryCode>${customerCountry}</CountryCode>
       </LegalEntity>
     </BuyerParty>
   </Parties>

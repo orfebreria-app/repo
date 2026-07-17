@@ -17,6 +17,7 @@ const empty = {
     electronica_habilitada: false,
     certificado_identificador: '',
     facturae_version: '3.2',
+    verification_url: '',
   },
   presupuesto_config: {
     plantilla: 'moderna',
@@ -256,7 +257,16 @@ export default function Configuracion({ session }) {
                 <input className="input" placeholder="3.2" value={form.factura_config?.facturae_version || '3.2'} disabled />
                 <p className="text-xs text-gray-600 mt-1">La aplicación genera un XML compatible con FacturaE básico para cumplir con futuras necesidades.</p>
               </div>
+              <div>
+                <label className="label">URL de verificación</label>
+                <input className="input" placeholder="https://tudominio.com/verificar"
+                  value={form.factura_config?.verification_url || ''}
+                  onChange={e => setForm({ ...form, factura_config: { ...(form.factura_config||{}), verification_url: e.target.value } })}
+                />
+                <p className="text-xs text-gray-600 mt-1">Opcional. Si se configura, el QR en el PDF redirigirá a esta URL con los datos de la factura.</p>
+              </div>
             </div>
+            <p className="text-xs text-gray-600 mt-2">Nota: la firma digital no se realiza automáticamente en el cliente. Este campo ayuda a identificar el certificado para una firma futura o para envío a Hacienda desde un servicio seguro.</p>
           </div>
         </div>
       </div>

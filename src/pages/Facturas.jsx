@@ -4,7 +4,7 @@ import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
          updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
 import { generarPDF } from '../lib/pdfGenerator'
-import { buildFacturaEXML, downloadXml } from '../lib/facturae'
+import { buildFacturaEXML, buildFacturaEVerificationText, downloadXml } from '../lib/facturae'
 import ModalPlantilla from '../components/ModalPlantilla'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
@@ -68,6 +68,25 @@ export default function Facturas({ session }) {
     return next
   })
 
+  const buildQrTextForFactura = (factura) => {
+    if (!empresa?.factura_config?.electronica_habilitada) return null
+    const verificationBase = empresa.factura_config?.verification_url
+    const invoiceRef = factura.folio || factura.id || ''
+    const totalAmount = Number(factura.total || 0).toFixed(2)
+    const issueDate = factura.fecha_emision || ''
+    if (verificationBase) {
+      const params = new URLSearchParams({
+        invoice: invoiceRef,
+        issuer: empresa.nif_cif || '',
+        client: factura.clientes?.nif_cif || '',
+        total: totalAmount,
+        date: issueDate,
+      })
+      return `${verificationBase.replace(/\/$/, '')}?${params.toString()}`
+    }
+    return buildFacturaEVerificationText({ empresa, factura, cliente: factura.clientes || {} })
+  }
+
   const handleDownloadSelectedPDFs = async () => {
     if (!selectedFacturas.length) return
     setGeneratingPDFs(true)
@@ -77,7 +96,7 @@ export default function Facturas({ session }) {
         const { data } = await getFactura(factura.id)
         if (!data) continue
         const conceptos = data.conceptos_factura || []
-        const qrText = `F:${data.folio || data.id};E:${empresa?.nif_cif || ''};C:${data.clientes?.nif_cif || ''};T:${Number(data.total || 0).toFixed(2)};D:${data.fecha_emision || ''}`
+        const qrText = buildQrTextForFactura(data)
         const doc = await generarPDF({
           factura: data,
           empresa,
@@ -97,6 +116,28 @@ export default function Facturas({ session }) {
     }
   }
 
+  const handleDownloadSelectedFacturaEXMLs = async () => {
+    if (!selectedFacturas.length || !empresa) return
+    try {
+      for (const factura of selectedFacturas) {
+        const { data } = await getFactura(factura.id)
+        if (!data) continue
+        const xml = buildFacturaEXML({
+          empresa,
+          factura: data,
+          cliente: data.clientes,
+          conceptos: data.conceptos_factura || [],
+          certificadoIdentificador: empresa.factura_config?.certificado_identificador,
+          facturaeVersion: empresa.factura_config?.facturae_version || '3.2',
+        })
+        downloadXml(`${data.folio || data.id}.xml`, xml)
+      }
+    } catch (error) {
+      console.error(error)
+      alert('Error al exportar los XML. Inténtalo de nuevo.')
+    }
+  }
+
   const handleExportFacturaE = async (id) => {
     if (!id || !empresa) return
     try {
@@ -110,6 +151,8 @@ export default function Facturas({ session }) {
         factura: data,
         cliente: data.clientes,
         conceptos: data.conceptos_factura || [],
+        certificadoIdentificador: empresa.factura_config?.certificado_identificador,
+        facturaeVersion: empresa.factura_config?.facturae_version || '3.2',
       })
       downloadXml(`${data.folio || data.id}.xml`, xml)
     } catch (error) {
@@ -245,6 +288,8 @@ export default function Facturas({ session }) {
               className="btn-primary text-xs px-3 py-2">
               {generatingPDFs ? 'Generando...' : '📥 Descargar PDFs'}
             </button>
+            <button onClick={handleDownloadSelectedFacturaEXMLs}
+              className="btn-secondary text-xs px-3 py-2">🧾 Descargar XML</button>
             <button onClick={() => setSelectedIds(new Set())}
               className="btn-secondary text-xs px-3 py-2">✕ Limpiar selección</button>
           </div>
