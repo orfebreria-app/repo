@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import QRCode from 'qrcode'
 
 // ─── PLANTILLAS ───────────────────────────────────────────
 export const PLANTILLAS = [
@@ -47,8 +48,31 @@ const logoSize = (img, maxW, maxH) => {
   return { w: +w.toFixed(1), h: +h.toFixed(1) }
 }
 
+const generarQrDataUrl = async (text, size = 80) => {
+  if (!text) return null
+  try {
+    return await QRCode.toDataURL(text, {
+      width: size * 4,
+      margin: 0,
+      color: { dark: '#111827', light: '#ffffff00' },
+    })
+  } catch (error) {
+    return null
+  }
+}
+
+const agregarQrCode = async (doc, text, x, y, size = 35) => {
+  const dataUrl = await generarQrDataUrl(text, size)
+  if (!dataUrl) return
+  try {
+    doc.addImage(dataUrl, 'PNG', x, y, size, size)
+  } catch (error) {
+    // No interrumpe la generación si el QR no se puede dibujar
+  }
+}
+
 // ─── GENERADOR PRINCIPAL ──────────────────────────────────
-export async function generarPDF({ factura, empresa, conceptos, plantilla = 'moderna', colorId = 'azul', logoUrl = null }) {
+export async function generarPDF({ factura, empresa, conceptos, plantilla = 'moderna', colorId = 'azul', logoUrl = null, qrText = null }) {
   const color = COLORES.find(c => c.id === colorId) || COLORES[0]
   const doc   = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })
 
@@ -69,6 +93,13 @@ export async function generarPDF({ factura, empresa, conceptos, plantilla = 'mod
   if (plantilla === 'moderna')      await plantillaModerna(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
   else if (plantilla === 'clasica') await plantillaClasica(doc,  { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
   else                              await plantillaMinimalista(doc, { factura, empresa, conceptos, color, logoData, W, M, fmt, fmtFecha, ...extra })
+
+  if (qrText) {
+    await agregarQrCode(doc, qrText, W - M - 35, 240, 35)
+    doc.setFontSize(7)
+    doc.setTextColor(120, 120, 120)
+    doc.text('Escanea para verificar', W - M - 17.5, 277, { align: 'center' })
+  }
 
   // Pie de página
   const pages = doc.internal.getNumberOfPages()

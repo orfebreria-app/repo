@@ -12,6 +12,7 @@ export default function ModalPlantilla({ factura, empresa, onClose }) {
     setGenerating(true)
     try {
       const conceptos = factura.conceptos_factura || []
+      const qrText = `F:${factura.folio};E:${empresa?.nif_cif || ''};C:${factura.clientes?.nif_cif || ''};T:${Number(factura.total || 0).toFixed(2)};D:${factura.fecha_emision || ''}`
       const doc = await generarPDF({
         factura,
         empresa,
@@ -19,6 +20,7 @@ export default function ModalPlantilla({ factura, empresa, onClose }) {
         plantilla,
         colorId,
         logoUrl: empresa?.logo_url || null,
+        qrText,
       })
       doc.save(`${factura.folio}.pdf`)
     } catch (e) {

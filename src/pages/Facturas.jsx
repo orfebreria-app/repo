@@ -4,6 +4,7 @@ import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
          updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
 import { generarPDF } from '../lib/pdfGenerator'
+import { buildFacturaEXML, downloadXml } from '../lib/facturae'
 import ModalPlantilla from '../components/ModalPlantilla'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
@@ -76,6 +77,7 @@ export default function Facturas({ session }) {
         const { data } = await getFactura(factura.id)
         if (!data) continue
         const conceptos = data.conceptos_factura || []
+        const qrText = `F:${data.folio || data.id};E:${empresa?.nif_cif || ''};C:${data.clientes?.nif_cif || ''};T:${Number(data.total || 0).toFixed(2)};D:${data.fecha_emision || ''}`
         const doc = await generarPDF({
           factura: data,
           empresa,
@@ -83,6 +85,7 @@ export default function Facturas({ session }) {
           plantilla: 'moderna',
           colorId: 'azul',
           logoUrl: empresa?.logo_url || null,
+          qrText,
         })
         doc.save(`${data.folio || data.id}.pdf`)
       }
@@ -91,6 +94,27 @@ export default function Facturas({ session }) {
       alert('Error al generar los PDFs. Inténtalo de nuevo.')
     } finally {
       setGeneratingPDFs(false)
+    }
+  }
+
+  const handleExportFacturaE = async (id) => {
+    if (!id || !empresa) return
+    try {
+      const { data } = await getFactura(id)
+      if (!data) {
+        alert('No se encontró la factura para exportar.')
+        return
+      }
+      const xml = buildFacturaEXML({
+        empresa,
+        factura: data,
+        cliente: data.clientes,
+        conceptos: data.conceptos_factura || [],
+      })
+      downloadXml(`${data.folio || data.id}.xml`, xml)
+    } catch (error) {
+      console.error(error)
+      alert('Error al exportar el XML. Inténtalo de nuevo.')
     }
   }
 
@@ -275,6 +299,10 @@ export default function Facturas({ session }) {
                       <button onClick={() => handlePDF(f.id)}
                         className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                         📥 PDF
+                      </button>
+                      <button onClick={() => handleExportFacturaE(f.id)}
+                        className="text-xs text-gray-500 hover:text-indigo-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
+                        🧾 XML
                       </button>
                       <button onClick={() => setEmailFactura(f)}
                         className="text-xs text-gray-500 hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-gray-800"

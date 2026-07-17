@@ -14,6 +14,9 @@ const empty = {
     textoPie: '',
     formaPago: '',
     notas: '',
+    electronica_habilitada: false,
+    certificado_identificador: '',
+    facturae_version: '3.2',
   },
   presupuesto_config: {
     plantilla: 'moderna',
@@ -226,6 +229,34 @@ export default function Configuracion({ session }) {
             <p className="text-xs text-gray-600 mt-2">
               Régimen especial para minoristas. Se aplica sobre la base imponible además del IVA (21%→5,2% · 10%→1,4% · 4%→0,5%).
             </p>
+          </div>
+          <div className="md:col-span-3 border-t border-gray-700 pt-4">
+            <label className="label">Factura electrónica</label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox"
+                  className="accent-brand-500"
+                  checked={!!form.factura_config?.electronica_habilitada}
+                  onChange={e => setForm({ ...form, factura_config: { ...(form.factura_config||{}), electronica_habilitada: e.target.checked } })}
+                />
+                <span className="text-sm text-gray-200">Habilitar exportación FacturaE y QR en PDF</span>
+              </label>
+            </div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Identificador de certificado</label>
+                <input className="input" placeholder="Ej: 12345678A"
+                  value={form.factura_config?.certificado_identificador||''}
+                  onChange={e => setForm({ ...form, factura_config: { ...(form.factura_config||{}), certificado_identificador: e.target.value } })}
+                />
+                <p className="text-xs text-gray-600 mt-1">Se guardará para futuras firmas digitales o integración con Hacienda.</p>
+              </div>
+              <div>
+                <label className="label">Versión FacturaE</label>
+                <input className="input" placeholder="3.2" value={form.factura_config?.facturae_version || '3.2'} disabled />
+                <p className="text-xs text-gray-600 mt-1">La aplicación genera un XML compatible con FacturaE básico para cumplir con futuras necesidades.</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
