@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
          updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
+import { generarPDF } from '../lib/pdfGenerator'
 import ModalPlantilla from '../components/ModalPlantilla'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
@@ -30,6 +31,9 @@ export default function Facturas({ session }) {
   const [pdfFactura,  setPdfFactura]  = useState(null)
   const [editFactura, setEditFactura] = useState(null)
   const [emailFactura, setEmailFactura] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [generatingPDFs, setGeneratingPDFs] = useState(false)
+  const selectAllRef = useRef(null)
 
   const sortFacturas = (arr) => [...(arr || [])].sort((a, b) => {
     const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
@@ -40,6 +44,113 @@ export default function Facturas({ session }) {
   const cargar = async (emp) => {
     const { data } = await getFacturas(emp.id)
     setFacturas(sortFacturas(data))
+  }
+
+  const selectedFacturas = facturas.filter(f => selectedIds.has(f.id))
+  const selectedTotal = selectedFacturas.reduce((sum, f) => sum + Number(f.total || 0), 0)
+
+  const toggleSeleccion = (id) => setSelectedIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+
+  const seleccionarTodos = () => setSelectedIds(prev => {
+    const ids = filtradas.map(f => f.id)
+    const allSelected = ids.length > 0 && ids.every(id => prev.has(id))
+    const next = new Set(prev)
+    ids.forEach(id => {
+      if (allSelected) next.delete(id)
+      else next.add(id)
+    })
+    return next
+  })
+
+  const handleDownloadSelectedPDFs = async () => {
+    if (!selectedFacturas.length) return
+    setGeneratingPDFs(true)
+    try {
+      const ordenadas = selectedFacturas
+      for (const factura of ordenadas) {
+        const { data } = await getFactura(factura.id)
+        if (!data) continue
+        const conceptos = data.conceptos_factura || []
+        const doc = await generarPDF({
+          factura: data,
+          empresa,
+          conceptos,
+          plantilla: 'moderna',
+          colorId: 'azul',
+          logoUrl: empresa?.logo_url || null,
+        })
+        doc.save(`${data.folio || data.id}.pdf`)
+      }
+    } catch (error) {
+      console.error(error)
+      alert('Error al generar los PDFs. Inténtalo de nuevo.')
+    } finally {
+      setGeneratingPDFs(false)
+    }
+  }
+
+  const handlePrintResumen = () => {
+    if (!selectedFacturas.length) return
+    const rows = selectedFacturas.map(f => ({
+      cliente: f.clientes?.nombre || '—',
+      fecha: formatFecha(f.fecha_emision),
+      estado: f.estado || '—',
+      importe: formatEuro(f.total),
+      folio: f.folio || '—',
+    }))
+
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Resumen facturas seleccionadas</title>
+          <style>
+            body { font-family: system-ui, sans-serif; color: #111827; margin: 24px; }
+            h1 { margin-bottom: 0.5rem; font-size: 1.5rem; }
+            table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+            th, td { padding: 0.75rem 0.5rem; border: 1px solid #d1d5db; text-align: left; }
+            th { background: #f3f4f6; }
+            tfoot td { font-weight: bold; }
+            .small { color: #6b7280; font-size: 0.95rem; }
+          </style>
+        </head>
+        <body>
+          <h1>Resumen de facturas seleccionadas</h1>
+          <div class="small">Seleccionadas: ${selectedFacturas.length} · Total: ${formatEuro(selectedTotal)}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Folio</th>
+                <th>Cliente</th>
+                <th>Fecha emisión</th>
+                <th>Estado</th>
+                <th>Importe</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r => `<tr><td>${r.folio}</td><td>${r.cliente}</td><td>${r.fecha}</td><td>${r.estado}</td><td style="text-align:right">${r.importe}</td></tr>`).join('')}
+            </tbody>
+            <tfoot>
+              <tr><td colspan="4">Total</td><td style="text-align:right">${formatEuro(selectedTotal)}</td></tr>
+            </tfoot>
+          </table>
+        </body>
+      </html>`
+
+    const printWindow = window.open('', '_blank')
+    if (!printWindow) {
+      alert('No se pudo abrir la ventana de impresión. Revisa el bloqueador de ventanas emergentes.')
+      return
+    }
+    printWindow.document.write(html)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.onload = () => printWindow.print()
   }
 
   useEffect(() => {
@@ -61,6 +172,16 @@ export default function Facturas({ session }) {
     .filter(f => filtro === 'todos' || f.estado === filtro)
     .filter(f => f.folio.toLowerCase().includes(buscar.toLowerCase()) || (f.clientes?.nombre || '').toLowerCase().includes(buscar.toLowerCase()))
   )
+
+  const visibleCount = filtradas.length
+  const visibleSelectedCount = filtradas.filter(f => selectedIds.has(f.id)).length
+  const allVisibleSelected = visibleCount > 0 && visibleSelectedCount === visibleCount
+  const someVisibleSelected = visibleSelectedCount > 0 && visibleSelectedCount < visibleCount
+
+  useEffect(() => {
+    if (!selectAllRef.current) return
+    selectAllRef.current.indeterminate = someVisibleSelected
+  }, [someVisibleSelected])
 
   if (loading) return <Skeleton />
 
@@ -84,6 +205,28 @@ export default function Facturas({ session }) {
       <input className="input max-w-sm" placeholder="🔍  Buscar por folio o cliente..."
         value={buscar} onChange={e => setBuscar(e.target.value)} />
 
+      {selectedFacturas.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between py-3 px-4 rounded-xl bg-gray-900 border border-gray-800">
+          <div className="space-y-1">
+            <div className="text-sm text-gray-300">{selectedFacturas.length} seleccionada{selectedFacturas.length !== 1 ? 's' : ''}</div>
+            <div className="text-xs text-gray-500">Total seleccionado: <span className="text-white">{formatEuro(selectedTotal)}</span></div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={seleccionarTodos}
+              className="btn-secondary text-xs px-3 py-2">{allVisibleSelected ? 'Deseleccionar todo' : 'Seleccionar todo visible'}</button>
+            <button onClick={handlePrintResumen}
+              className="btn-secondary text-xs px-3 py-2">🖨️ Imprimir resumen</button>
+            <button onClick={handleDownloadSelectedPDFs}
+              disabled={generatingPDFs}
+              className="btn-primary text-xs px-3 py-2">
+              {generatingPDFs ? 'Generando...' : '📥 Descargar PDFs'}
+            </button>
+            <button onClick={() => setSelectedIds(new Set())}
+              className="btn-secondary text-xs px-3 py-2">✕ Limpiar selección</button>
+          </div>
+        </div>
+      )}
+
       <div className="card p-0 overflow-hidden">
         {filtradas.length === 0 ? (
           <div className="text-center py-16 text-gray-600">
@@ -95,6 +238,10 @@ export default function Facturas({ session }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
+                <Th center>
+                  <input ref={selectAllRef} type="checkbox" className="accent-brand-500" checked={allVisibleSelected}
+                    onChange={seleccionarTodos} />
+                </Th>
                 <Th>Folio</Th><Th>Cliente</Th><Th>Fecha</Th><Th>Vencimiento</Th>
                 <Th right>Total</Th><Th center>Estado</Th><Th />
               </tr>
@@ -102,6 +249,10 @@ export default function Facturas({ session }) {
             <tbody>
               {filtradas.map(f => (
                 <tr key={f.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                  <td className="py-3 px-4 text-center">
+                    <input type="checkbox" className="accent-brand-500" checked={selectedIds.has(f.id)}
+                      onChange={() => toggleSeleccion(f.id)} />
+                  </td>
                   <td className="py-3 px-4 font-mono text-xs text-gray-300">{f.folio}</td>
                   <td className="py-3 px-4 text-white font-medium">{f.clientes?.nombre || '—'}</td>
                   <td className="py-3 px-4 text-gray-500 text-xs">{formatFecha(f.fecha_emision)}</td>
