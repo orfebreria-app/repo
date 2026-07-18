@@ -446,9 +446,13 @@ export const verificarFactura = async ({ folio, nif, total, fecha }) => {
 // ── Envío de email ─────────────────────────────────────
 export const enviarEmail = async ({ to, subject, html, fromName }) => {
   try {
+    const { data: { session } } = await supabase.auth.getSession()
     const res = await fetch('/api/send-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+      },
       body: JSON.stringify({ to, subject, html, fromName }),
     })
     const data = await res.json()
