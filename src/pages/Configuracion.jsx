@@ -258,12 +258,12 @@ export default function Configuracion({ session }) {
                 <p className="text-xs text-gray-600 mt-1">La aplicación genera un XML compatible con FacturaE básico para cumplir con futuras necesidades.</p>
               </div>
               <div>
-                <label className="label">URL de verificación</label>
-                <input className="input" placeholder="https://tudominio.com/verificar"
+                <label className="label">URL de verificación (avanzado)</label>
+                <input className="input" placeholder="Déjalo vacío para usar la verificación integrada"
                   value={form.factura_config?.verification_url || ''}
                   onChange={e => setForm({ ...form, factura_config: { ...(form.factura_config||{}), verification_url: e.target.value } })}
                 />
-                <p className="text-xs text-gray-600 mt-1">Opcional. Si se configura, el QR en el PDF redirigirá a esta URL con los datos de la factura.</p>
+                <p className="text-xs text-gray-600 mt-1">Opcional. El QR ya funciona sin rellenar esto — usa la página de verificación integrada en la app (/verificar). Solo rellena este campo si quieres usar un dominio propio de verificación en su lugar.</p>
               </div>
             </div>
             <p className="text-xs text-gray-600 mt-2">Nota: la firma digital no se realiza automáticamente en el cliente. Este campo ayuda a identificar el certificado para una firma futura o para envío a Hacienda desde un servicio seguro.</p>

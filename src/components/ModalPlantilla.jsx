@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { PLANTILLAS, COLORES, generarPDF } from '../lib/pdfGenerator'
-import { buildFacturaEVerificationText } from '../lib/facturae'
+import { buildVerificationUrl } from '../lib/verificacion'
 
 export default function ModalPlantilla({ factura, empresa, onClose }) {
   const [plantilla, setPlantilla] = useState('moderna')
@@ -13,18 +13,7 @@ export default function ModalPlantilla({ factura, empresa, onClose }) {
     setGenerating(true)
     try {
       const conceptos = factura.conceptos_factura || []
-      const verificationBase = empresa?.factura_config?.verification_url
-      const qrText = empresa?.factura_config?.electronica_habilitada
-        ? verificationBase
-          ? `${verificationBase.replace(/\/$/, '')}?${new URLSearchParams({
-              invoice: factura.folio || factura.id || '',
-              issuer: empresa.nif_cif || '',
-              client: factura.clientes?.nif_cif || '',
-              total: Number(factura.total || 0).toFixed(2),
-              date: factura.fecha_emision || '',
-            }).toString()}`
-          : buildFacturaEVerificationText({ empresa, factura, cliente: factura.clientes || {} })
-        : null
+      const qrText = buildVerificationUrl({ empresa, factura })
       const doc = await generarPDF({
         factura,
         empresa,

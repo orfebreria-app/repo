@@ -4,7 +4,8 @@ import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
          updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
 import { generarPDF } from '../lib/pdfGenerator'
-import { buildFacturaEXML, buildFacturaEVerificationText, downloadXml } from '../lib/facturae'
+import { buildFacturaEXML, downloadXml } from '../lib/facturae'
+import { buildVerificationUrl } from '../lib/verificacion'
 import ModalPlantilla from '../components/ModalPlantilla'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
@@ -68,24 +69,7 @@ export default function Facturas({ session }) {
     return next
   })
 
-  const buildQrTextForFactura = (factura) => {
-    if (!empresa?.factura_config?.electronica_habilitada) return null
-    const verificationBase = empresa.factura_config?.verification_url
-    const invoiceRef = factura.folio || factura.id || ''
-    const totalAmount = Number(factura.total || 0).toFixed(2)
-    const issueDate = factura.fecha_emision || ''
-    if (verificationBase) {
-      const params = new URLSearchParams({
-        invoice: invoiceRef,
-        issuer: empresa.nif_cif || '',
-        client: factura.clientes?.nif_cif || '',
-        total: totalAmount,
-        date: issueDate,
-      })
-      return `${verificationBase.replace(/\/$/, '')}?${params.toString()}`
-    }
-    return buildFacturaEVerificationText({ empresa, factura, cliente: factura.clientes || {} })
-  }
+  const buildQrTextForFactura = (factura) => buildVerificationUrl({ empresa, factura })
 
   const handleDownloadSelectedPDFs = async () => {
     if (!selectedFacturas.length) return

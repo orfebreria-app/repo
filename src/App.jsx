@@ -11,6 +11,7 @@ import Configuracion from './pages/Configuracion'
 import Tickets from './pages/Tickets'
 import Presupuestos from './pages/Presupuestos'
 import Stock from './pages/Stock'
+import Verificar from './pages/Verificar'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -20,6 +21,16 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
   }, [])
+
+  // Ruta pública: accesible sin sesión, es a donde apunta el QR de las
+  // facturas. Se comprueba ANTES de exigir login.
+  if (window.location.pathname === '/verificar') {
+    return (
+      <Routes>
+        <Route path="/verificar" element={<Verificar />} />
+      </Routes>
+    )
+  }
 
   if (session === undefined) {
     return (
