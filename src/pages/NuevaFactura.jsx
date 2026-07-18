@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
 import { format, addDays } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -109,8 +109,14 @@ export default function NuevaFactura({ session }) {
       return setError('Completa todos los conceptos')
 
     setSaving(true)
-    const folioAuto = `${empresa.serie}-${String(siguienteFolio || 1).padStart(4, '0')}`
-    const folio = folioEditado.trim() || folioAuto
+
+    let folio = folioEditado.trim()
+    if (!folio) {
+      const { folio: folioReservado, error: errFolio } = await getSiguienteFolioAtomico(empresa.id)
+      if (errFolio) { setError('No se pudo asignar el número de factura: ' + errFolio.message); setSaving(false); return }
+      folio = folioReservado
+    }
+
     const facturaData = {
       empresa_id: empresa.id, cliente_id: form.cliente_id,
       folio, fecha_emision: form.fecha_emision,
@@ -214,9 +220,9 @@ export default function NuevaFactura({ session }) {
           </label>
           <input
             className="input font-mono"
-            value={folioEditado || (siguienteFolio ? `${empresa.serie}-${String(siguienteFolio).padStart(4,'0')}` : '...')}
+            value={folioEditado || (siguienteFolio ? `${(empresa.serie || '').replace(/-+$/, '')}-${String(siguienteFolio).padStart(4,'0')}` : '...')}
             onChange={e => setFolioEditado(e.target.value)}
-            placeholder={siguienteFolio ? `${empresa.serie}-${String(siguienteFolio).padStart(4,'0')}` : 'Cargando...'}
+            placeholder={siguienteFolio ? `${(empresa.serie || '').replace(/-+$/, '')}-${String(siguienteFolio).padStart(4,'0')}` : 'Cargando...'}
           />
         </div>
       </div>

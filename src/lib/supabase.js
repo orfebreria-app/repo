@@ -112,10 +112,15 @@ export const createFactura = async (factura, conceptos) => {
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { data: null, error: errConc }
 
-  await supabase.rpc('increment_folio', { empresa_id_param: factura.empresa_id })
-    .catch(() => {})
-
   return { data: fact, error: null }
+}
+
+// Reserva el siguiente folio de forma atómica (sin riesgo de duplicados
+// por dos facturas creadas casi a la vez). Llamar SIEMPRE antes de
+// createFactura cuando el folio no se ha editado manualmente.
+export const getSiguienteFolioAtomico = async (empresaId) => {
+  const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
+  return { folio: data, error }
 }
 
 export const updateEstadoFactura = async (id, estado) => {
