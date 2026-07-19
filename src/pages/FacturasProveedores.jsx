@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  getEmpresa, getProveedores, getProductos,
+  getEmpresa, getProveedores, getProductos, upsertProducto,
   getFacturasProveedor, createFacturaProveedor,
   updateEstadoFacturaProveedor, deleteFacturaProveedor,
   formatEuro, formatFecha,
@@ -14,6 +14,7 @@ const lineaVacia = () => ({
   precio_unitario: '',
   iva_tasa: 21,
   producto_id: null,
+  referencia: '',
 })
 
 const calcLinea = (l) => +(Number(l.cantidad) * Number(l.precio_unitario || 0)).toFixed(2)
@@ -82,6 +83,36 @@ export default function FacturasProveedores({ session }) {
     if (!lineasValidas.length) return setError('Añade al menos una línea con descripción y precio')
 
     setSaving(true)
+
+    // Para cada línea con código: si coincide con un producto ya
+    // existente, se usa ese; si no, se crea un producto nuevo sobre
+    // la marcha (con stock 0 — la cantidad comprada se sumará justo
+    // después, igual que con cualquier producto ya existente).
+    const lineasConProducto = []
+    for (const l of lineasValidas) {
+      let productoId = l.producto_id
+      const ref = (l.referencia || '').trim()
+      if (!productoId && ref) {
+        const existente = productos.find(p => (p.referencia || '').toLowerCase() === ref.toLowerCase())
+        if (existente) {
+          productoId = existente.id
+        } else {
+          const { data: nuevoProd, error: errProd } = await upsertProducto({
+            empresa_id: empresa.id,
+            proveedor_id: form.proveedor_id,
+            nombre: l.descripcion || ref,
+            referencia: ref,
+            precio_compra: Number(l.precio_unitario) || 0,
+            iva_tasa: Number(l.iva_tasa),
+            stock_actual: 0,
+          })
+          if (errProd) { setError('Error al crear el producto "' + ref + '": ' + errProd.message); setSaving(false); return }
+          productoId = nuevoProd.id
+        }
+      }
+      lineasConProducto.push({ ...l, producto_id: productoId })
+    }
+
     const factura = {
       empresa_id: empresa.id,
       proveedor_id: form.proveedor_id,
@@ -93,7 +124,7 @@ export default function FacturasProveedores({ session }) {
       iva_total: +ivaTotal.toFixed(2),
       total: +total.toFixed(2),
     }
-    const lineas = lineasValidas.map(l => ({
+    const lineas = lineasConProducto.map(l => ({
       descripcion: l.descripcion,
       cantidad: Number(l.cantidad),
       precio_unitario: Number(l.precio_unitario),
@@ -219,33 +250,44 @@ export default function FacturasProveedores({ session }) {
               <div className="space-y-2">
                 {form.lineas.map(l => (
                   <div key={l._id} className="grid grid-cols-12 gap-2 items-start">
-                    <select
-                      className="input col-span-3 text-xs"
-                      value={l.producto_id || ''}
+                    <input
+                      className="input col-span-2 text-xs font-mono"
+                      list="lista-referencias"
+                      placeholder="Código"
+                      value={l.referencia}
                       onChange={e => {
-                        const prod = productos.find(p => p.id === e.target.value)
-                        setLinea(l._id, 'producto_id', e.target.value || null)
+                        const ref = e.target.value
+                        setLinea(l._id, 'referencia', ref)
+                        const prod = productos.find(p => (p.referencia || '').toLowerCase() === ref.trim().toLowerCase())
                         if (prod) {
+                          setLinea(l._id, 'producto_id', prod.id)
                           setLinea(l._id, 'descripcion', prod.nombre)
                           setLinea(l._id, 'precio_unitario', prod.precio_compra || '')
                           setLinea(l._id, 'iva_tasa', prod.iva_tasa ?? 21)
+                        } else {
+                          setLinea(l._id, 'producto_id', null)
                         }
                       }}
-                    >
-                      <option value="">(sin vincular)</option>
-                      {productos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                    </select>
+                    />
                     <input className="input col-span-4 text-xs" placeholder="Descripción" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
                     <input className="input col-span-1 text-xs" type="number" step="0.001" min="0" value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
                     <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
                     <select className="input col-span-1 text-xs" value={l.iva_tasa} onChange={e => setLinea(l._id, 'iva_tasa', e.target.value)}>
                       <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
                     </select>
+                    <span className="col-span-1 text-xs text-center pt-2" title={l.referencia ? (l.producto_id ? 'Producto existente' : 'Se creará como producto nuevo') : 'Sin código: no afecta al stock'}>
+                      {l.referencia ? (l.producto_id ? '✅' : '🆕') : '—'}
+                    </span>
                     <button type="button" onClick={() => removeLinea(l._id)} className="col-span-1 text-gray-600 hover:text-red-400 text-xs">✕</button>
                   </div>
                 ))}
               </div>
-              <p className="text-xs text-gray-600 mt-2">Vincular una línea a un producto suma su cantidad al stock automáticamente al guardar.</p>
+              <datalist id="lista-referencias">
+                {productos.filter(p => p.referencia).map(p => <option key={p.id} value={p.referencia} />)}
+              </datalist>
+              <p className="text-xs text-gray-600 mt-2">
+                Escribe el código del artículo: si ya existe se vincula y suma stock; si no existe, se crea automáticamente al guardar. Deja el código vacío para una línea que no sea de stock (portes, servicios...).
+              </p>
             </div>
 
             <div>
