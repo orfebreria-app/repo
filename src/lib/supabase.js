@@ -112,6 +112,13 @@ export const createFactura = async (factura, conceptos) => {
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { data: null, error: errConc }
 
+  // Sella la factura en la cadena de huella. Si esto falla no se
+  // deshace la factura (ya está guardada y es válida igualmente),
+  // pero se avisa en consola para poder revisarlo.
+  const { data: hash, error: errHash } = await supabase.rpc('sellar_factura', { p_factura_id: fact.id })
+  if (errHash) console.error('No se pudo sellar la factura en la cadena de huella:', errHash)
+  else fact.hash = hash
+
   return { data: fact, error: null }
 }
 
@@ -121,6 +128,32 @@ export const createFactura = async (factura, conceptos) => {
 export const getSiguienteFolioAtomico = async (empresaId) => {
   const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
   return { folio: data, error }
+}
+
+// ── Informe de IVA ─────────────────────────────────────
+// Facturas emitidas (ventas) con sus líneas, para un rango de fechas.
+// Se excluyen los borradores (no emitidos) y las canceladas.
+export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
+  const { data, error } = await supabase
+    .from('facturas')
+    .select('*, conceptos_factura(*)')
+    .eq('empresa_id', empresaId)
+    .gte('fecha_emision', desde)
+    .lte('fecha_emision', hasta)
+    .not('estado', 'in', '(borrador,cancelada)')
+  return { data: data || [], error }
+}
+
+// Facturas de compra recibidas de proveedores, para el mismo rango.
+export const getComprasParaInforme = async (empresaId, desde, hasta) => {
+  const { data, error } = await supabase
+    .from('facturas_proveedor')
+    .select('*, lineas_factura_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .gte('fecha_factura', desde)
+    .lte('fecha_factura', hasta)
+    .neq('estado', 'cancelada')
+  return { data: data || [], error }
 }
 
 export const updateEstadoFactura = async (id, estado) => {

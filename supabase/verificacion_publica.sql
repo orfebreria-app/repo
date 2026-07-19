@@ -26,7 +26,8 @@ returns table (
   fecha_emision  date,
   total          numeric,
   estado         estado_factura,
-  empresa_nombre text
+  empresa_nombre text,
+  hash           text
 )
 language plpgsql
 security definer
@@ -36,11 +37,12 @@ begin
   return query
   select
     true,
-    f.folio,
+    f.folio::text,
     f.fecha_emision,
     f.total,
     f.estado,
-    e.nombre
+    e.nombre::text,
+    f.hash
   from facturas f
   join empresas e on e.id = f.empresa_id
   where f.folio = p_folio

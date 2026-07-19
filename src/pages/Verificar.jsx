@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { verificarFactura, formatEuro, formatFecha } from '../lib/supabase'
 
@@ -48,6 +48,12 @@ export default function Verificar() {
               <div className="flex justify-between"><span className="text-gray-500">Fecha</span><span className="text-gray-100">{formatFecha(resultado.fecha_emision)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="text-gray-100">{formatEuro(resultado.total)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Estado</span><span className="text-gray-100 capitalize">{resultado.estado}</span></div>
+              {resultado.hash && (
+                <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-700/50">
+                  <span className="text-gray-500">🔒 Huella</span>
+                  <span className="text-gray-400 font-mono text-[10px]">{resultado.hash.slice(0, 16)}…</span>
+                </div>
+              )}
             </div>
           </>
         )}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getEmpresa, upsertEmpresa, supabase } from '../lib/supabase'
 import { PLANTILLAS, COLORES } from '../lib/pdfGenerator'
+import { format } from 'date-fns'
 
 const empty = {
   nombre: '', nif_cif: '', email: '', telefono: '',
@@ -36,6 +37,47 @@ export default function Configuracion({ session }) {
   const [saved, setSaved]     = useState(false)
   const [error, setError]     = useState('')
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [exportando, setExportando] = useState(false)
+
+  const handleExportarBackup = async () => {
+    setExportando(true)
+    setError('')
+    try {
+      const empresaId = form.id
+      const tablas = ['clientes', 'proveedores', 'productos', 'facturas', 'conceptos_factura', 'facturas_proveedor', 'lineas_factura_proveedor', 'presupuestos', 'tickets']
+      const resultado = { generado_en: new Date().toISOString(), empresa: form }
+
+      for (const tabla of tablas) {
+        // conceptos_factura y lineas_factura_proveedor no tienen empresa_id
+        // directo — se filtran a través de sus facturas/facturas de proveedor.
+        if (tabla === 'conceptos_factura' || tabla === 'lineas_factura_proveedor') continue
+        const { data } = await supabase.from(tabla).select('*').eq('empresa_id', empresaId)
+        resultado[tabla] = data || []
+      }
+      // Líneas de factura y de compra, vía los IDs ya obtenidos
+      const facturaIds = resultado.facturas.map(f => f.id)
+      const facturaProvIds = resultado.facturas_proveedor.map(f => f.id)
+      if (facturaIds.length) {
+        const { data } = await supabase.from('conceptos_factura').select('*').in('factura_id', facturaIds)
+        resultado.conceptos_factura = data || []
+      } else resultado.conceptos_factura = []
+      if (facturaProvIds.length) {
+        const { data } = await supabase.from('lineas_factura_proveedor').select('*').in('factura_id', facturaProvIds)
+        resultado.lineas_factura_proveedor = data || []
+      } else resultado.lineas_factura_proveedor = []
+
+      const blob = new Blob([JSON.stringify(resultado, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `backup-facturacion-${format(new Date(), 'yyyy-MM-dd')}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError('Error al generar la copia de seguridad: ' + err.message)
+    }
+    setExportando(false)
+  }
 
   const handleLogoUpload = async (e) => {
     const file = e.target.files?.[0]
@@ -413,6 +455,18 @@ export default function Configuracion({ session }) {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Copia de seguridad */}
+      <div className="card space-y-3">
+        <h2 className="font-bold text-white">Copia de seguridad</h2>
+        <p className="text-sm text-gray-400">
+          Descarga una copia de todos tus datos (clientes, facturas, productos, proveedores y compras) en un archivo.
+          Guárdalo en tu carpeta de OneDrive, Google Drive o donde prefieras — así tienes tu propia copia además de la de Supabase.
+        </p>
+        <button type="button" onClick={handleExportarBackup} className="btn-secondary" disabled={exportando}>
+          {exportando ? 'Generando...' : '⬇ Descargar copia de seguridad'}
+        </button>
       </div>
 
       {/* Info cuenta */}

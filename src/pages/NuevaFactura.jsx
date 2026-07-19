@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro } from '../lib/supabase'
+import { calcLinea, calcularTotalesFactura, tasaRE } from '../lib/calculos'
 import { format, addDays } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -12,12 +13,6 @@ const lineaVacia = () => ({
   descuento: 0,
   producto_id: null,
 })
-
-const calcLinea = (l) => {
-  const base = Number(l.cantidad) * Number(l.precio_unitario || 0)
-  const desc = base * (Number(l.descuento) / 100)
-  return +(base - desc).toFixed(2)
-}
 
 export default function NuevaFactura({ session }) {
   const navigate = useNavigate()
@@ -67,18 +62,7 @@ export default function NuevaFactura({ session }) {
     init()
   }, [session])
 
-  const subtotal   = lineas.reduce((s, l) => s + calcLinea(l), 0)
-  const ivaTotal   = lineas.reduce((s, l) => {
-    const base = calcLinea(l)
-    return s + +(base * (Number(l.iva_tasa) / 100)).toFixed(2)
-  }, 0)
-  const reTotal = clienteRE
-    ? lineas.reduce((s, l) => {
-        const base = calcLinea(l)
-        return s + +(base * tasaRE(l.iva_tasa) / 100).toFixed(2)
-      }, 0)
-    : 0
-  const total = +(subtotal + ivaTotal + reTotal).toFixed(2)
+  const { subtotal, ivaTotal, reTotal, total } = calcularTotalesFactura(lineas, clienteRE)
 
   const addLinea    = () => setLineas([...lineas, lineaVacia()])
   const removeLinea = (id) => lineas.length > 1 && setLineas(lineas.filter(l => l._id !== id))
