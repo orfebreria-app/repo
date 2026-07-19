@@ -11,6 +11,7 @@ const NAV = [
   { to: '/proveedores',   icon: '🏭', label: 'Proveedores' },
   { to: '/facturas-proveedores', icon: '📥', label: 'Facturas de compra' },
   { to: '/clientes',      icon: '👥', label: 'Clientes' },
+  { to: '/informe-iva',   icon: '📊', label: 'Informe de IVA' },
   { to: '/configuracion', icon: '⚙️', label: 'Configuración' },
 ]
 
