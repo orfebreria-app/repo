@@ -11,6 +11,8 @@ import Configuracion from './pages/Configuracion'
 import Tickets from './pages/Tickets'
 import Presupuestos from './pages/Presupuestos'
 import Stock from './pages/Stock'
+import Proveedores from './pages/Proveedores'
+import FacturasProveedores from './pages/FacturasProveedores'
 import Verificar from './pages/Verificar'
 
 export default function App() {
@@ -56,6 +58,8 @@ export default function App() {
         <Route path="/tickets"        element={<Tickets session={session} />} />
         <Route path="/presupuestos"   element={<Presupuestos session={session} />} />
         <Route path="/stock"          element={<Stock session={session} />} />
+        <Route path="/proveedores"    element={<Proveedores session={session} />} />
+        <Route path="/facturas-proveedores" element={<FacturasProveedores session={session} />} />
         <Route path="/configuracion"  element={<Configuracion session={session} />} />
         <Route path="*"               element={<Navigate to="/dashboard" replace />} />
       </Routes>

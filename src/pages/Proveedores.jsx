@@ -1,73 +1,52 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { getEmpresa, getProveedores, upsertProveedor, deleteProveedor } from '../lib/supabase'
 
-const empty = { nombre:'', nif_cif:'', email:'', telefono:'', direccion:'', ciudad:'', cp:'' }
+const empty = { nombre:'', nif_cif:'', email:'', telefono:'', direccion:'', ciudad:'', web:'', notas:'' }
 
-export default function Proveedores() {
+export default function Proveedores({ session }) {
+  const [empresa, setEmpresa]     = useState(null)
   const [proveedores, setProveedores] = useState([])
-  const [form, setForm] = useState(empty)
-  const [modal, setModal] = useState(false)
-  const [error, setError] = useState('')
-  const [buscar, setBuscar] = useState('')
+  const [loading, setLoading]     = useState(true)
+  const [modal, setModal]         = useState(false)
+  const [form, setForm]           = useState(empty)
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState('')
+  const [buscar, setBuscar]       = useState('')
 
-  // Exportar proveedores a CSV
-  const exportCSV = () => {
-    const headers = ['Nombre','NIF/CIF','Email','Teléfono','Dirección','Ciudad','CP']
-    const rows = proveedores.map(p => [
-      p.nombre,
-      p.nif_cif,
-      p.email,
-      p.telefono,
-      p.direccion,
-      p.ciudad,
-      p.cp
-    ])
-    const csv = [headers, ...rows].map(r => r.map(x => `"${String(x).replace(/"/g,'""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'proveedores.csv'
-    a.click()
-    URL.revokeObjectURL(url)
+  const cargar = async (emp) => {
+    const { data } = await getProveedores(emp.id)
+    setProveedores(data)
   }
 
-  // Importar proveedores desde CSV
-  const importCSV = e => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const text = ev.target.result
-      const lines = text.split(/\r?\n/).filter(Boolean)
-      if (lines.length < 2) return
-      const [header, ...rows] = lines
-      const cols = header.split(',').map(h => h.replace(/"/g,''))
-      const newProveedores = rows.map(row => {
-        const vals = row.match(/("[^"]*"|[^,]+)/g).map(v => v.replace(/"/g,''))
-        const obj = { id: Date.now() + Math.random() }
-        cols.forEach((c,i) => { obj[c.toLowerCase()] = vals[i] })
-        return obj
-      })
-      setProveedores(p => [...p, ...newProveedores])
+  useEffect(() => {
+    const init = async () => {
+      const { data: emp } = await getEmpresa(session.user.id)
+      setEmpresa(emp)
+      if (emp) await cargar(emp)
+      setLoading(false)
     }
-    reader.readAsText(file)
-  }
+    init()
+  }, [session])
 
   const openNew  = () => { setForm(empty); setError(''); setModal(true) }
+  const openEdit = (p) => { setForm(p); setError(''); setModal(true) }
   const closeModal = () => setModal(false)
 
-  const handleSave = e => {
+  const handleSave = async (e) => {
     e.preventDefault()
     if (!form.nombre.trim()) return setError('El nombre es obligatorio')
-    setProveedores(p => [...p, { ...form, id: Date.now() }])
-    setModal(false)
-    setForm(empty)
-    setError('')
+    setSaving(true)
+    const { error: err } = await upsertProveedor({ ...form, empresa_id: empresa.id })
+    if (err) { setError(err.message); setSaving(false); return }
+    await cargar(empresa)
+    setSaving(false)
+    closeModal()
   }
 
-  const handleDelete = id => {
+  const handleDelete = async (id) => {
     if (!confirm('¿Eliminar este proveedor?')) return
-    setProveedores(p => p.filter(x => x.id !== id))
+    await deleteProveedor(id)
+    await cargar(empresa)
   }
 
   const filtrados = proveedores.filter(p =>
@@ -76,50 +55,32 @@ export default function Proveedores() {
     (p.nif_cif || '').toLowerCase().includes(buscar.toLowerCase())
   )
 
+  if (loading) return <Skeleton />
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold text-white">Proveedores</h1>
-        <div className="flex gap-2">
-          <button className="btn-secondary" onClick={exportCSV} type="button">Exportar CSV</button>
-          <label className="btn-secondary cursor-pointer">
-            Importar CSV
-            <input type="file" accept=".csv" style={{display:'none'}} onChange={importCSV} />
-          </label>
-          <button onClick={openNew} className="btn-primary flex items-center gap-2">
-            <span>+</span> Nuevo proveedor
-          </button>
-        </div>
+        <button onClick={openNew} className="btn-primary flex items-center gap-2">
+          <span>+</span> Nuevo proveedor
+        </button>
       </div>
-      <input
-        className="input max-w-sm"
-        placeholder="🔍  Buscar por nombre, email o NIF..."
-        value={buscar}
-        onChange={e => setBuscar(e.target.value)}
-      />
+
+      <input className="input max-w-sm" placeholder="🔍  Buscar por nombre, email o NIF..."
+        value={buscar} onChange={e => setBuscar(e.target.value)} />
+
       <div className="card p-0 overflow-hidden">
         {filtrados.length === 0 ? (
           <div className="text-center py-16 text-gray-600">
-            <div className="text-4xl mb-3">📦</div>
+            <div className="text-4xl mb-3">🏭</div>
             <p className="text-sm">{buscar ? 'Sin resultados' : 'Aún no hay proveedores.'}</p>
-            {!buscar && (
-              <button onClick={openNew} className="text-brand-500 text-sm hover:underline mt-1">
-                Añadir primer proveedor
-              </button>
-            )}
+            {!buscar && <button onClick={openNew} className="text-brand-500 text-sm hover:underline mt-1">Añadir primer proveedor</button>}
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
-                <th>Nombre</th>
-                <th>NIF/CIF</th>
-                <th>Email</th>
-                <th>Teléfono</th>
-                <th>Dirección</th>
-                <th>Ciudad</th>
-                <th>CP</th>
-                <th></th>
+                <Th>Nombre</Th><Th>NIF/CIF</Th><Th>Email</Th><Th>Teléfono</Th><Th />
               </tr>
             </thead>
             <tbody>
@@ -129,14 +90,10 @@ export default function Proveedores() {
                   <td className="py-3 px-4 text-gray-400 font-mono text-xs">{p.nif_cif || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{p.email || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{p.telefono || '—'}</td>
-                  <td className="py-3 px-4 text-gray-400 text-xs">{p.direccion || '—'}</td>
-                  <td className="py-3 px-4 text-gray-400 text-xs">{p.ciudad || '—'}</td>
-                  <td className="py-3 px-4 text-gray-400 text-xs">{p.cp || '—'}</td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex gap-2 justify-end">
-                      <button onClick={() => handleDelete(p.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
-                        Eliminar
-                      </button>
+                      <button onClick={() => openEdit(p)} className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">Editar</button>
+                      <button onClick={() => handleDelete(p.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
                     </div>
                   </td>
                 </tr>
@@ -145,47 +102,79 @@ export default function Proveedores() {
           </table>
         )}
       </div>
-      {/* Modal para nuevo proveedor */}
+
       {modal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
-          <form onSubmit={handleSave} className="card p-6 space-y-4 w-full max-w-md">
-            <h2 className="font-bold text-lg text-white mb-2">Nuevo proveedor</h2>
-            <div>
-              <label className="label">Nombre *</label>
-              <input className="input" value={form.nombre} onChange={e => setForm(f => ({...f, nombre: e.target.value}))} required />
+        <Modal title={form.id ? 'Editar proveedor' : 'Nuevo proveedor'} onClose={closeModal}>
+          <form onSubmit={handleSave} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="label">Nombre / Razón social *</label>
+                <input className="input" value={form.nombre || ''} onChange={e => setForm({...form, nombre: e.target.value})} required />
+              </div>
+              <div>
+                <label className="label">NIF / CIF</label>
+                <input className="input" value={form.nif_cif || ''} onChange={e => setForm({...form, nif_cif: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input className="input" type="email" value={form.email || ''} onChange={e => setForm({...form, email: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">Teléfono</label>
+                <input className="input" value={form.telefono || ''} onChange={e => setForm({...form, telefono: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">Ciudad</label>
+                <input className="input" value={form.ciudad || ''} onChange={e => setForm({...form, ciudad: e.target.value})} />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Dirección</label>
+                <input className="input" placeholder="Calle, número, piso..." value={form.direccion || ''} onChange={e => setForm({...form, direccion: e.target.value})} />
+              </div>
+              <div>
+                <label className="label">Web</label>
+                <input className="input" placeholder="https://..." value={form.web || ''} onChange={e => setForm({...form, web: e.target.value})} />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Notas</label>
+                <textarea className="input h-16 resize-none text-sm" value={form.notas || ''} onChange={e => setForm({...form, notas: e.target.value})} />
+              </div>
             </div>
-            <div>
-              <label className="label">NIF/CIF</label>
-              <input className="input" value={form.nif_cif} onChange={e => setForm(f => ({...f, nif_cif: e.target.value}))} />
-            </div>
-            <div>
-              <label className="label">Email</label>
-              <input className="input" type="email" value={form.email} onChange={e => setForm(f => ({...f, email: e.target.value}))} />
-            </div>
-            <div>
-              <label className="label">Teléfono</label>
-              <input className="input" value={form.telefono} onChange={e => setForm(f => ({...f, telefono: e.target.value}))} />
-            </div>
-            <div>
-              <label className="label">Dirección</label>
-              <input className="input" value={form.direccion} onChange={e => setForm(f => ({...f, direccion: e.target.value}))} />
-            </div>
-            <div>
-              <label className="label">Ciudad</label>
-              <input className="input" value={form.ciudad} onChange={e => setForm(f => ({...f, ciudad: e.target.value}))} />
-            </div>
-            <div>
-              <label className="label">Código postal</label>
-              <input className="input" value={form.cp} onChange={e => setForm(f => ({...f, cp: e.target.value}))} />
-            </div>
-            {error && <div className="text-red-500 text-sm">{error}</div>}
-            <div className="flex gap-2 justify-end pt-2">
+            {error && <p className="text-red-400 text-sm">{error}</p>}
+            <div className="flex justify-end gap-3 pt-1">
               <button type="button" onClick={closeModal} className="btn-secondary">Cancelar</button>
-              <button type="submit" className="btn-primary">Guardar</button>
+              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
             </div>
           </form>
-        </div>
+        </Modal>
       )}
     </div>
   )
 }
+
+const Th = ({ children }) => (
+  <th className="text-left py-3 px-4 text-xs text-gray-500 font-semibold uppercase tracking-wide">{children}</th>
+)
+
+function Modal({ title, onClose, children }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-lg">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-bold text-white">{title}</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const Skeleton = () => (
+  <div className="max-w-4xl mx-auto space-y-4 animate-pulse">
+    <div className="h-8 bg-gray-800 rounded w-32" />
+    <div className="h-10 bg-gray-800 rounded w-64" />
+    <div className="h-48 bg-gray-800 rounded-xl" />
+  </div>
+)
