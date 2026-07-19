@@ -216,80 +216,36 @@ export const descontarStockVenta = async (empresaId, lineas, referenciaId, refer
   if (!lineasConProducto.length) return { error: null }
 
   for (const linea of lineasConProducto) {
-    // Obtener stock actual
-    const { data: prod } = await supabase
-      .from('productos')
-      .select('stock_actual')
-      .eq('id', linea.producto_id)
-      .single()
-
-    if (!prod) continue
-    const anterior = Number(prod.stock_actual)
-    const cantidad = Number(linea.cantidad)
-    const posterior = anterior - cantidad
-
-    // Actualizar stock
-    await supabase
-      .from('productos')
-      .update({ stock_actual: posterior })
-      .eq('id', linea.producto_id)
-
-    // Registrar movimiento
-    await supabase.from('movimientos_stock').insert({
-      empresa_id:      empresaId,
-      producto_id:     linea.producto_id,
-      tipo:            referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
-      cantidad:        -cantidad,
-      stock_anterior:  anterior,
-      stock_posterior: posterior,
-      referencia_id:   referenciaId,
-      referencia_tipo: referenciaTipo,
+    const { error } = await supabase.rpc('mover_stock', {
+      p_producto_id: linea.producto_id,
+      p_delta: -Number(linea.cantidad),
+      p_tipo: referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
+      p_referencia_id: referenciaId,
+      p_referencia_tipo: referenciaTipo,
     })
+    if (error) return { error }
   }
   return { error: null }
 }
 
 export const entradaStock = async (empresaId, productoId, cantidad, notas = '') => {
-  const { data: prod } = await supabase
-    .from('productos')
-    .select('stock_actual')
-    .eq('id', productoId)
-    .single()
-  if (!prod) return { error: 'Producto no encontrado' }
-
-  const anterior = Number(prod.stock_actual)
-  const posterior = anterior + Number(cantidad)
-
-  await supabase.from('productos').update({ stock_actual: posterior }).eq('id', productoId)
-  await supabase.from('movimientos_stock').insert({
-    empresa_id: empresaId, producto_id: productoId,
-    tipo: 'entrada', cantidad: Number(cantidad),
-    stock_anterior: anterior, stock_posterior: posterior,
-    referencia_tipo: 'manual', notas,
+  const { error } = await supabase.rpc('mover_stock', {
+    p_producto_id: productoId,
+    p_delta: Number(cantidad),
+    p_tipo: 'entrada',
+    p_referencia_tipo: 'manual',
+    p_notas: notas,
   })
-  return { error: null }
+  return { error }
 }
 
 export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '') => {
-  const { data: prod } = await supabase
-    .from('productos')
-    .select('stock_actual')
-    .eq('id', productoId)
-    .single()
-  if (!prod) return { error: 'Producto no encontrado' }
-
-  const anterior = Number(prod.stock_actual)
-  const diff = Number(nuevoStock) - anterior
-
-  await supabase.from('productos').update({ stock_actual: Number(nuevoStock) }).eq('id', productoId)
-  await supabase.from('movimientos_stock').insert({
-    empresa_id: empresaId, producto_id: productoId,
-    tipo: diff >= 0 ? 'ajuste_positivo' : 'ajuste_negativo',
-    cantidad: diff,
-    stock_anterior: anterior, stock_posterior: Number(nuevoStock),
-    referencia_tipo: 'manual', notas: notas || 'Ajuste manual',
+  const { error } = await supabase.rpc('fijar_stock', {
+    p_producto_id: productoId,
+    p_nuevo_stock: Number(nuevoStock),
+    p_notas: notas || 'Ajuste manual',
   })
-  return { error: null }
+  return { error }
 }
 
 // ── Facturas de proveedor (Compras) ───────────────────
@@ -334,25 +290,19 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
 
   // Sumar stock de productos vinculados y actualizar precio de compra
   for (const linea of lineas.filter(l => l.producto_id)) {
-    const { data: prod } = await supabase
-      .from('productos')
-      .select('stock_actual')
-      .eq('id', linea.producto_id)
-      .single()
-    if (!prod) continue
-    const anterior  = Number(prod.stock_actual)
-    const posterior = anterior + Number(linea.cantidad)
-    await supabase.from('productos').update({
-      stock_actual:  posterior,
-      precio_compra: Number(linea.precio_unitario), // ← actualizar precio compra
-    }).eq('id', linea.producto_id)
-    await supabase.from('movimientos_stock').insert({
-      empresa_id: factura.empresa_id, producto_id: linea.producto_id,
-      tipo: 'entrada', cantidad: Number(linea.cantidad),
-      stock_anterior: anterior, stock_posterior: posterior,
-      referencia_id: fp.id, referencia_tipo: 'compra',
-      notas: `Factura proveedor ${factura.numero || fp.id.slice(0,8)}`,
+    await supabase.rpc('mover_stock', {
+      p_producto_id: linea.producto_id,
+      p_delta: Number(linea.cantidad),
+      p_tipo: 'entrada',
+      p_referencia_id: fp.id,
+      p_referencia_tipo: 'compra',
+      p_notas: `Factura proveedor ${factura.numero || fp.id.slice(0,8)}`,
     })
+    // El precio de compra no es un contador (no hay condición de
+    // carrera real en sobrescribirlo), así que se actualiza aparte.
+    await supabase.from('productos').update({
+      precio_compra: Number(linea.precio_unitario),
+    }).eq('id', linea.producto_id)
   }
 
   return { data: fp, error: null }
@@ -392,17 +342,13 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 
   // 2. Revertir stock de los conceptos originales con producto
   for (const c of (conceptosOriginales || []).filter(c => c.producto_id)) {
-    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
-    if (!prod) continue
-    const anterior  = Number(prod.stock_actual)
-    const posterior = anterior + Number(c.cantidad) // devolver lo que se descontó
-    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
-    await supabase.from('movimientos_stock').insert({
-      empresa_id: empresaId, producto_id: c.producto_id,
-      tipo: 'ajuste_positivo', cantidad: Number(c.cantidad),
-      stock_anterior: anterior, stock_posterior: posterior,
-      referencia_id: facturaId, referencia_tipo: 'factura',
-      notas: 'Reversión por edición de factura',
+    await supabase.rpc('mover_stock', {
+      p_producto_id: c.producto_id,
+      p_delta: Number(c.cantidad), // devolver lo que se descontó
+      p_tipo: 'ajuste_positivo',
+      p_referencia_id: facturaId,
+      p_referencia_tipo: 'factura',
+      p_notas: 'Reversión por edición de factura',
     })
   }
 
@@ -414,17 +360,13 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 
   // 4. Descontar stock de los nuevos conceptos con producto
   for (const c of conceptosNuevos.filter(c => c.producto_id)) {
-    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
-    if (!prod) continue
-    const anterior  = Number(prod.stock_actual)
-    const posterior = anterior - Number(c.cantidad)
-    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
-    await supabase.from('movimientos_stock').insert({
-      empresa_id: empresaId, producto_id: c.producto_id,
-      tipo: 'salida_factura', cantidad: -Number(c.cantidad),
-      stock_anterior: anterior, stock_posterior: posterior,
-      referencia_id: facturaId, referencia_tipo: 'factura',
-      notas: 'Edición de factura',
+    await supabase.rpc('mover_stock', {
+      p_producto_id: c.producto_id,
+      p_delta: -Number(c.cantidad),
+      p_tipo: 'salida_factura',
+      p_referencia_id: facturaId,
+      p_referencia_tipo: 'factura',
+      p_notas: 'Edición de factura',
     })
   }
 
