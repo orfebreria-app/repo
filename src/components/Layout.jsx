@@ -9,6 +9,7 @@ const NAV = [
   { to: '/tickets',       icon: '🏪', label: 'Caja / Tickets' },
   { to: '/stock',         icon: '📦', label: 'Stock' },
   { to: '/proveedores',   icon: '🏭', label: 'Proveedores' },
+  { to: '/albaranes-proveedor', icon: '📋', label: 'Albaranes' },
   { to: '/facturas-proveedores', icon: '📥', label: 'Facturas de compra' },
   { to: '/clientes',      icon: '👥', label: 'Clientes' },
   { to: '/informe-iva',   icon: '📊', label: 'Informe de IVA' },

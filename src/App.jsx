@@ -12,6 +12,7 @@ import Tickets from './pages/Tickets'
 import Presupuestos from './pages/Presupuestos'
 import Stock from './pages/Stock'
 import Proveedores from './pages/Proveedores'
+import AlbaranesProveedor from './pages/AlbaranesProveedor'
 import FacturasProveedores from './pages/FacturasProveedores'
 import InformeIVA from './pages/InformeIVA'
 import Verificar from './pages/Verificar'
@@ -60,6 +61,7 @@ export default function App() {
         <Route path="/presupuestos"   element={<Presupuestos session={session} />} />
         <Route path="/stock"          element={<Stock session={session} />} />
         <Route path="/proveedores"    element={<Proveedores session={session} />} />
+        <Route path="/albaranes-proveedor" element={<AlbaranesProveedor session={session} />} />
         <Route path="/facturas-proveedores" element={<FacturasProveedores session={session} />} />
         <Route path="/informe-iva"    element={<InformeIVA session={session} />} />
         <Route path="/configuracion"  element={<Configuracion session={session} />} />
