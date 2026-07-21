@@ -402,21 +402,13 @@ export const deleteAlbaranProveedor = async (id) => {
 }
 
 // Crea la factura de proveedor a partir de uno o varios albaranes ya
-// recibidos: junta todas sus líneas, calcula los totales, crea la
-// factura SIN volver a tocar el stock, y marca los albaranes usados
-// como 'facturado' para que dejen de aparecer como pendientes.
-export const crearFacturaDesdeAlbaranes = async (factura, albaranes) => {
-  const todasLineas = albaranes.flatMap(a =>
-    (a.lineas_albaran_proveedor || []).map(l => ({
-      descripcion: l.descripcion,
-      cantidad: l.cantidad,
-      precio_unitario: l.precio_unitario,
-      iva_tasa: l.iva_tasa,
-      subtotal: l.subtotal,
-      producto_id: l.producto_id,
-    }))
-  )
-
+// recibidos, con las líneas que pases (el importe puede haberse
+// editado a mano respecto al albarán — el precio en el albarán es
+// el que se esperaba, el de la factura es el que cobra el proveedor
+// de verdad). Crea la factura SIN volver a tocar el stock, y marca
+// los albaranes usados como 'facturado' para que dejen de aparecer
+// como pendientes.
+export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) => {
   const { data: fp, error: errFp } = await supabase
     .from('facturas_proveedor')
     .insert(factura)
@@ -424,15 +416,14 @@ export const crearFacturaDesdeAlbaranes = async (factura, albaranes) => {
     .single()
   if (errFp) return { data: null, error: errFp }
 
-  const items = todasLineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
+  const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
   const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
   if (errL) return { data: null, error: errL }
 
-  const idsAlbaranes = albaranes.map(a => a.id)
   const { error: errUpd } = await supabase
     .from('albaranes_proveedor')
     .update({ estado: 'facturado', factura_id: fp.id })
-    .in('id', idsAlbaranes)
+    .in('id', albaranIds)
   if (errUpd) return { data: null, error: errUpd }
 
   return { data: fp, error: null }

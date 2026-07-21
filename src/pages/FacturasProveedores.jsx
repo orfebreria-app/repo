@@ -100,22 +100,38 @@ export default function FacturasProveedores({ session }) {
     setSeleccionados(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   }
 
+  // Cada vez que cambia la selección de albaranes, se regeneran las
+  // líneas editables de la factura a partir de sus líneas — el
+  // usuario puede tocar el precio si el proveedor cobra distinto
+  // en la factura respecto a lo que ponía el albarán.
+  useEffect(() => {
+    if (modo !== 'albaranes') return
+    const lineasDeAlbaranes = albaranesPendientes
+      .filter(a => seleccionados.includes(a.id))
+      .flatMap(a => (a.lineas_albaran_proveedor || []).map(l => ({
+        _id: l.id,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        precio_unitario: l.precio_unitario,
+        iva_tasa: l.iva_tasa,
+        producto_id: l.producto_id,
+        referencia: l.referencia || '',
+      })))
+    setForm(f => ({ ...f, lineas: lineasDeAlbaranes }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seleccionados, modo])
+
   const setLinea = (id, campo, valor) => {
     setForm(f => ({ ...f, lineas: f.lineas.map(l => l._id === id ? { ...l, [campo]: valor } : l) }))
   }
   const addLinea = () => setForm(f => ({ ...f, lineas: [...f.lineas, lineaVacia()] }))
   const removeLinea = (id) => setForm(f => ({ ...f, lineas: f.lineas.filter(l => l._id !== id) }))
 
-  // Totales: en modo manual, de las líneas escritas a mano.
-  // En modo albaranes, de los albaranes marcados.
+  // Totales: siempre a partir de form.lineas (editable en ambos modos)
   const albaranesElegidos = albaranesPendientes.filter(a => seleccionados.includes(a.id))
-  const subtotal = modo === 'manual'
-    ? form.lineas.reduce((s, l) => s + calcLinea(l), 0)
-    : albaranesElegidos.reduce((s, a) => s + Number(a.subtotal), 0)
-  const ivaTotal = modo === 'manual'
-    ? form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
-    : albaranesElegidos.reduce((s, a) => s + Number(a.iva_total), 0)
-  const total = subtotal + ivaTotal
+  const subtotal  = form.lineas.reduce((s, l) => s + calcLinea(l), 0)
+  const ivaTotal  = form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
+  const total     = subtotal + ivaTotal
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -137,7 +153,15 @@ export default function FacturasProveedores({ session }) {
 
     if (modo === 'albaranes') {
       if (!albaranesElegidos.length) { setError('Selecciona al menos un albarán'); setSaving(false); return }
-      const { error: err } = await crearFacturaDesdeAlbaranes(factura, albaranesElegidos)
+      const lineas = form.lineas.map(l => ({
+        descripcion: l.descripcion,
+        cantidad: Number(l.cantidad),
+        precio_unitario: Number(l.precio_unitario),
+        iva_tasa: Number(l.iva_tasa),
+        subtotal: calcLinea(l),
+        producto_id: l.producto_id || null,
+      }))
+      const { error: err } = await crearFacturaDesdeAlbaranes(factura, lineas, albaranesElegidos.map(a => a.id))
       if (err) { setError(err.message); setSaving(false); return }
     } else {
       const lineasValidas = form.lineas.filter(l => l.descripcion.trim() && Number(l.precio_unitario) > 0)
@@ -317,6 +341,31 @@ export default function FacturasProveedores({ session }) {
                         </div>
                       </label>
                     ))}
+                  </div>
+                )}
+
+                {seleccionados.length > 0 && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="label mb-0">Líneas de la factura</label>
+                      <span className="text-xs text-gray-600">Puedes ajustar el precio si el proveedor cobra distinto a lo indicado en el albarán</span>
+                    </div>
+                    <div className="space-y-2">
+                      {form.lineas.map(l => (
+                        <div key={l._id} className="grid grid-cols-12 gap-2 items-center">
+                          <input className="input col-span-5 text-xs" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
+                          <input className="input col-span-2 text-xs" type="number" step="0.001" min="0" value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
+                          <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
+                          <select className="input col-span-2 text-xs" value={l.iva_tasa} onChange={e => setLinea(l._id, 'iva_tasa', e.target.value)}>
+                            <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
+                          </select>
+                          <span className="col-span-1 text-xs text-right font-mono text-gray-400">{formatEuro(calcLinea(l))}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-600 mt-2">
+                      Si cambias la cantidad respecto al albarán, recuerda que el stock ya se sumó con la cantidad original — ajústalo a mano en Stock si hace falta.
+                    </p>
                   </div>
                 )}
               </div>
