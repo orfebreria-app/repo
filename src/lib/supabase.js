@@ -341,6 +341,103 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
   return { data: fp, error: null }
 }
 
+// ── Albaranes de proveedor ─────────────────────────────
+// El albarán registra la mercancía en cuanto llega (y suma el
+// stock en ese momento). La factura, cuando llega después, se
+// genera agrupando uno o varios albaranes ya recibidos — sin
+// volver a tocar el stock, porque ya se sumó al recibir cada uno.
+
+export const getAlbaranesProveedor = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('albaranes_proveedor')
+    .select('*, proveedores(nombre)')
+    .eq('empresa_id', empresaId)
+    .order('fecha_albaran', { ascending: false })
+  return { data: data || [], error }
+}
+
+// Albaranes de un proveedor concreto que aún no se han facturado
+export const getAlbaranesPendientes = async (empresaId, proveedorId) => {
+  const { data, error } = await supabase
+    .from('albaranes_proveedor')
+    .select('*, lineas_albaran_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .eq('proveedor_id', proveedorId)
+    .eq('estado', 'pendiente')
+    .order('fecha_albaran', { ascending: true })
+  return { data: data || [], error }
+}
+
+export const createAlbaranProveedor = async (albaran, lineas) => {
+  const { data: alb, error: errAlb } = await supabase
+    .from('albaranes_proveedor')
+    .insert(albaran)
+    .select()
+    .single()
+  if (errAlb) return { data: null, error: errAlb }
+
+  const items = lineas.map((l, i) => ({ ...l, albaran_id: alb.id, orden: i }))
+  const { error: errL } = await supabase.from('lineas_albaran_proveedor').insert(items)
+  if (errL) return { data: null, error: errL }
+
+  // La mercancía ya ha llegado físicamente, así que el stock se
+  // suma ahora — no se espera a que llegue la factura.
+  for (const l of lineas.filter(l => l.producto_id)) {
+    await supabase.rpc('mover_stock', {
+      p_producto_id: l.producto_id,
+      p_delta: Number(l.cantidad),
+      p_tipo: 'entrada',
+      p_referencia_id: alb.id,
+      p_referencia_tipo: 'albaran',
+      p_notas: `Albarán ${albaran.numero || alb.id.slice(0, 8)}`,
+    })
+  }
+
+  return { data: alb, error: null }
+}
+
+export const deleteAlbaranProveedor = async (id) => {
+  const { error } = await supabase.from('albaranes_proveedor').delete().eq('id', id)
+  return { error }
+}
+
+// Crea la factura de proveedor a partir de uno o varios albaranes ya
+// recibidos: junta todas sus líneas, calcula los totales, crea la
+// factura SIN volver a tocar el stock, y marca los albaranes usados
+// como 'facturado' para que dejen de aparecer como pendientes.
+export const crearFacturaDesdeAlbaranes = async (factura, albaranes) => {
+  const todasLineas = albaranes.flatMap(a =>
+    (a.lineas_albaran_proveedor || []).map(l => ({
+      descripcion: l.descripcion,
+      cantidad: l.cantidad,
+      precio_unitario: l.precio_unitario,
+      iva_tasa: l.iva_tasa,
+      subtotal: l.subtotal,
+      producto_id: l.producto_id,
+    }))
+  )
+
+  const { data: fp, error: errFp } = await supabase
+    .from('facturas_proveedor')
+    .insert(factura)
+    .select()
+    .single()
+  if (errFp) return { data: null, error: errFp }
+
+  const items = todasLineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
+  const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
+  if (errL) return { data: null, error: errL }
+
+  const idsAlbaranes = albaranes.map(a => a.id)
+  const { error: errUpd } = await supabase
+    .from('albaranes_proveedor')
+    .update({ estado: 'facturado', factura_id: fp.id })
+    .in('id', idsAlbaranes)
+  if (errUpd) return { data: null, error: errUpd }
+
+  return { data: fp, error: null }
+}
+
 export const updateEstadoFacturaProveedor = async (id, estado) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
