@@ -457,3 +457,24 @@ export const enviarEmail = async ({ to, subject, html, fromName }) => {
     return { error: err.message }
   }
 }
+
+
+// ── Compatibilidad temporal de exports usados por otras páginas ─────────────
+export const getSiguienteFolioAtomico = async (empresaId) => {
+  const { data, error } = await getFacturas(empresaId)
+  if (error) return { data: null, error }
+  const maxNum = (data || []).reduce((max, f) => {
+    const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0
+    return n > max ? n : max
+  }, 0)
+  return { data: maxNum + 1, error: null }
+}
+
+export const getAlbaranesProveedor = async () => ({ data: [], error: null })
+export const createAlbaranProveedor = async () => ({ data: null, error: null })
+export const deleteAlbaranProveedor = async () => ({ error: null })
+export const getAlbaranesPendientes = async () => ({ data: [], error: null })
+export const crearFacturaDesdeAlbaranes = async () => ({ data: null, error: null })
+export const getFacturasParaInforme = async () => ({ data: [], error: null })
+export const getComprasParaInforme = async () => ({ data: [], error: null })
+export const verificarFactura = async () => ({ data: null, error: null })
