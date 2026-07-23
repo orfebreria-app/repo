@@ -5,7 +5,7 @@ import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          getMovimientos, entradaStock, ajusteStock,
          getFacturasProveedor, createFacturaProveedor,
          updateEstadoFacturaProveedor, deleteFacturaProveedor,
-         formatEuro, formatFecha } from '../lib/supabase'
+         formatEuro, formatFecha, calcPrecioVentaSugerido } from '../lib/supabase'
 
 const TABS = ['📦 Productos', '🏭 Proveedores', '📚 Catálogos', '🧾 Compras', '📋 Movimientos']
 
@@ -544,7 +544,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   const esNuevo = !producto.id
   const [form, setForm] = useState({
     nombre: '', referencia: '', descripcion: '', categoria: '',
-    precio_venta: '', precio_compra: '', iva_tasa: 21,
+    precio_venta: '', precio_compra: '', multiplicador_venta: '', precio_venta_manual: false, iva_tasa: 21,
     stock_actual: 0, stock_minimo: 0, unidad: 'ud',
     proveedor_id: '', activo: true, imagen_url: '',
     ...producto,
@@ -555,6 +555,19 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   const [verImagen, setVerImagen] = useState(false)
 
   const f = (k) => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
+
+  const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
+  const multiplicadorProveedor = Number(proveedorSeleccionado?.multiplicador_venta || 2.5)
+
+  const recalcularPrecioVenta = (next) => {
+    if (next.precio_venta_manual) return next
+    const precio_venta = calcPrecioVentaSugerido({
+      precioCompra: next.precio_compra,
+      multiplicadorProducto: next.multiplicador_venta,
+      multiplicadorProveedor,
+    })
+    return { ...next, precio_venta }
+  }
 
   const handleImagen = async (e) => {
     const file = e.target.files?.[0]
@@ -579,6 +592,8 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
       ...formLimpio,
       precio_venta:  Number(form.precio_venta)  || 0,
       precio_compra: Number(form.precio_compra) || 0,
+      multiplicador_venta: form.multiplicador_venta === '' ? null : Number(form.multiplicador_venta),
+      precio_venta_manual: !!form.precio_venta_manual,
       iva_tasa:      Number(form.iva_tasa)      || 21,
       stock_actual:  Number(form.stock_actual)  || 0,
       stock_minimo:  Number(form.stock_minimo)  || 0,
@@ -657,7 +672,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
         </div>
         <div>
           <label className="label">Proveedor</label>
-          <select className="input" {...f('proveedor_id')}>
+          <select className="input" value={form.proveedor_id ?? ''} onChange={e => setForm(p => recalcularPrecioVenta({ ...p, proveedor_id: e.target.value }))}>
             <option value="">Sin proveedor</option>
             {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
           </select>
@@ -669,12 +684,21 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
           </select>
         </div>
         <div>
-          <label className="label">Precio de venta (con IVA) €</label>
-          <input className="input" type="number" step="0.01" min="0" placeholder="0.00" {...f('precio_venta')} />
+          <label className="label">Precio de venta sugerido €</label>
+          <input className="input" type="number" step="0.01" min="0" placeholder="0.00" value={form.precio_venta ?? ''} onChange={e => setForm(p => ({ ...p, precio_venta: e.target.value, precio_venta_manual: true }))} />
+          <label className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+            <input type="checkbox" checked={!!form.precio_venta_manual} onChange={e => setForm(p => e.target.checked ? { ...p, precio_venta_manual: true } : recalcularPrecioVenta({ ...p, precio_venta_manual: false } ))} />
+            Mantener precio de venta manual
+          </label>
         </div>
         <div>
           <label className="label">Precio de compra €</label>
-          <input className="input" type="number" step="0.01" min="0" placeholder="0.00" {...f('precio_compra')} />
+          <input className="input" type="number" step="0.01" min="0" placeholder="0.00" value={form.precio_compra ?? ''} onChange={e => setForm(p => recalcularPrecioVenta({ ...p, precio_compra: e.target.value }))} />
+        </div>
+        <div>
+          <label className="label">Multiplicador producto</label>
+          <input className="input" type="number" step="0.001" min="0" placeholder={`Proveedor (${multiplicadorProveedor.toFixed(3)})`} value={form.multiplicador_venta ?? ''} onChange={e => setForm(p => recalcularPrecioVenta({ ...p, multiplicador_venta: e.target.value }))} />
+          <p className="text-xs text-gray-600 mt-1">Vacío = usa el multiplicador del proveedor ({multiplicadorProveedor.toFixed(3)})</p>
         </div>
         <div>
           <label className="label">IVA %</label>
@@ -737,6 +761,19 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   const f = (k) => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
 
+  const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
+  const multiplicadorProveedor = Number(proveedorSeleccionado?.multiplicador_venta || 2.5)
+
+  const recalcularPrecioVenta = (next) => {
+    if (next.precio_venta_manual) return next
+    const precio_venta = calcPrecioVentaSugerido({
+      precioCompra: next.precio_compra,
+      multiplicadorProducto: next.multiplicador_venta,
+      multiplicadorProveedor,
+    })
+    return { ...next, precio_venta }
+  }
+
   const handleSave = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
     setSaving(true)
@@ -779,6 +816,11 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
         <div className="md:col-span-2">
           <label className="label">Dirección</label>
           <input className="input" placeholder="Calle Mayor 1" {...f('direccion')} />
+        </div>
+        <div>
+          <label className="label">Multiplicador proveedor</label>
+          <input className="input" type="number" step="0.001" min="0" value={form.multiplicador_venta ?? ''} onChange={e => setForm(p => ({ ...p, multiplicador_venta: e.target.value }))} />
+          <p className="text-xs text-gray-600 mt-1">Se usa por defecto para calcular el precio de venta de sus productos</p>
         </div>
         <div>
           <label className="label">Web</label>

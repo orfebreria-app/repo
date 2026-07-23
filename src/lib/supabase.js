@@ -112,48 +112,10 @@ export const createFactura = async (factura, conceptos) => {
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { data: null, error: errConc }
 
-  // Sella la factura en la cadena de huella. Si esto falla no se
-  // deshace la factura (ya está guardada y es válida igualmente),
-  // pero se avisa en consola para poder revisarlo.
-  const { data: hash, error: errHash } = await supabase.rpc('sellar_factura', { p_factura_id: fact.id })
-  if (errHash) console.error('No se pudo sellar la factura en la cadena de huella:', errHash)
-  else fact.hash = hash
+  await supabase.rpc('increment_folio', { empresa_id_param: factura.empresa_id })
+    .catch(() => {})
 
   return { data: fact, error: null }
-}
-
-// Reserva el siguiente folio de forma atómica (sin riesgo de duplicados
-// por dos facturas creadas casi a la vez). Llamar SIEMPRE antes de
-// createFactura cuando el folio no se ha editado manualmente.
-export const getSiguienteFolioAtomico = async (empresaId) => {
-  const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
-  return { folio: data, error }
-}
-
-// ── Informe de IVA ─────────────────────────────────────
-// Facturas emitidas (ventas) con sus líneas, para un rango de fechas.
-// Se excluyen los borradores (no emitidos) y las canceladas.
-export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
-  const { data, error } = await supabase
-    .from('facturas')
-    .select('*, conceptos_factura(*)')
-    .eq('empresa_id', empresaId)
-    .gte('fecha_emision', desde)
-    .lte('fecha_emision', hasta)
-    .not('estado', 'in', '(borrador,cancelada)')
-  return { data: data || [], error }
-}
-
-// Facturas de compra recibidas de proveedores, para el mismo rango.
-export const getComprasParaInforme = async (empresaId, desde, hasta) => {
-  const { data, error } = await supabase
-    .from('facturas_proveedor')
-    .select('*, lineas_factura_proveedor(*)')
-    .eq('empresa_id', empresaId)
-    .gte('fecha_factura', desde)
-    .lte('fecha_factura', hasta)
-    .neq('estado', 'cancelada')
-  return { data: data || [], error }
 }
 
 export const updateEstadoFactura = async (id, estado) => {
@@ -178,6 +140,15 @@ export const formatEuro = (n) =>
 export const formatFecha = (d) => {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+
+export const calcPrecioVentaSugerido = ({ precioCompra = 0, multiplicadorProducto = null, multiplicadorProveedor = null }) => {
+  const base = Number(precioCompra) || 0
+  const multProd = multiplicadorProducto === '' || multiplicadorProducto === null || multiplicadorProducto === undefined ? null : Number(multiplicadorProducto)
+  const multProv = multiplicadorProveedor === '' || multiplicadorProveedor === null || multiplicadorProveedor === undefined ? 2.5 : Number(multiplicadorProveedor)
+  const multiplicador = multProd && multProd > 0 ? multProd : (multProv && multProv > 0 ? multProv : 2.5)
+  return +(base * multiplicador).toFixed(2)
 }
 
 // ── Proveedores ───────────────────────────────────────
@@ -249,36 +220,80 @@ export const descontarStockVenta = async (empresaId, lineas, referenciaId, refer
   if (!lineasConProducto.length) return { error: null }
 
   for (const linea of lineasConProducto) {
-    const { error } = await supabase.rpc('mover_stock', {
-      p_producto_id: linea.producto_id,
-      p_delta: -Number(linea.cantidad),
-      p_tipo: referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
-      p_referencia_id: referenciaId,
-      p_referencia_tipo: referenciaTipo,
+    // Obtener stock actual
+    const { data: prod } = await supabase
+      .from('productos')
+      .select('stock_actual')
+      .eq('id', linea.producto_id)
+      .single()
+
+    if (!prod) continue
+    const anterior = Number(prod.stock_actual)
+    const cantidad = Number(linea.cantidad)
+    const posterior = anterior - cantidad
+
+    // Actualizar stock
+    await supabase
+      .from('productos')
+      .update({ stock_actual: posterior })
+      .eq('id', linea.producto_id)
+
+    // Registrar movimiento
+    await supabase.from('movimientos_stock').insert({
+      empresa_id:      empresaId,
+      producto_id:     linea.producto_id,
+      tipo:            referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
+      cantidad:        -cantidad,
+      stock_anterior:  anterior,
+      stock_posterior: posterior,
+      referencia_id:   referenciaId,
+      referencia_tipo: referenciaTipo,
     })
-    if (error) return { error }
   }
   return { error: null }
 }
 
 export const entradaStock = async (empresaId, productoId, cantidad, notas = '') => {
-  const { error } = await supabase.rpc('mover_stock', {
-    p_producto_id: productoId,
-    p_delta: Number(cantidad),
-    p_tipo: 'entrada',
-    p_referencia_tipo: 'manual',
-    p_notas: notas,
+  const { data: prod } = await supabase
+    .from('productos')
+    .select('stock_actual')
+    .eq('id', productoId)
+    .single()
+  if (!prod) return { error: 'Producto no encontrado' }
+
+  const anterior = Number(prod.stock_actual)
+  const posterior = anterior + Number(cantidad)
+
+  await supabase.from('productos').update({ stock_actual: posterior }).eq('id', productoId)
+  await supabase.from('movimientos_stock').insert({
+    empresa_id: empresaId, producto_id: productoId,
+    tipo: 'entrada', cantidad: Number(cantidad),
+    stock_anterior: anterior, stock_posterior: posterior,
+    referencia_tipo: 'manual', notas,
   })
-  return { error }
+  return { error: null }
 }
 
 export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '') => {
-  const { error } = await supabase.rpc('fijar_stock', {
-    p_producto_id: productoId,
-    p_nuevo_stock: Number(nuevoStock),
-    p_notas: notas || 'Ajuste manual',
+  const { data: prod } = await supabase
+    .from('productos')
+    .select('stock_actual')
+    .eq('id', productoId)
+    .single()
+  if (!prod) return { error: 'Producto no encontrado' }
+
+  const anterior = Number(prod.stock_actual)
+  const diff = Number(nuevoStock) - anterior
+
+  await supabase.from('productos').update({ stock_actual: Number(nuevoStock) }).eq('id', productoId)
+  await supabase.from('movimientos_stock').insert({
+    empresa_id: empresaId, producto_id: productoId,
+    tipo: diff >= 0 ? 'ajuste_positivo' : 'ajuste_negativo',
+    cantidad: diff,
+    stock_anterior: anterior, stock_posterior: Number(nuevoStock),
+    referencia_tipo: 'manual', notas: notas || 'Ajuste manual',
   })
-  return { error }
+  return { error: null }
 }
 
 // ── Facturas de proveedor (Compras) ───────────────────
@@ -312,7 +327,6 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
   const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
   if (errL) return { data: null, error: errL }
 
-  // Guardar plazos de vencimiento si los hay
   if (vencimientos.length > 0) {
     const plazos = vencimientos.map(v => ({
       factura_id: fp.id, empresa_id: factura.empresa_id,
@@ -321,110 +335,36 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
     await supabase.from('vencimientos_factura_proveedor').insert(plazos)
   }
 
-  // Sumar stock de productos vinculados y actualizar precio de compra
   for (const linea of lineas.filter(l => l.producto_id)) {
-    await supabase.rpc('mover_stock', {
-      p_producto_id: linea.producto_id,
-      p_delta: Number(linea.cantidad),
-      p_tipo: 'entrada',
-      p_referencia_id: fp.id,
-      p_referencia_tipo: 'compra',
-      p_notas: `Factura proveedor ${factura.numero || fp.id.slice(0,8)}`,
-    })
-    // El precio de compra no es un contador (no hay condición de
-    // carrera real en sobrescribirlo), así que se actualiza aparte.
-    await supabase.from('productos').update({
-      precio_compra: Number(linea.precio_unitario),
-    }).eq('id', linea.producto_id)
+    const { data: prod } = await supabase
+      .from('productos')
+      .select('id, precio_venta_manual, multiplicador_venta, proveedor_id')
+      .eq('id', linea.producto_id)
+      .single()
+    if (!prod) continue
+
+    let multiplicadorProveedor = 2.5
+    if (prod.proveedor_id) {
+      const { data: prov } = await supabase
+        .from('proveedores')
+        .select('multiplicador_venta')
+        .eq('id', prod.proveedor_id)
+        .single()
+      if (prov?.multiplicador_venta) multiplicadorProveedor = Number(prov.multiplicador_venta)
+    }
+
+    const precioCompra = Number(linea.precio_unitario) || 0
+    const payload = { precio_compra: precioCompra }
+    if (!prod.precio_venta_manual) {
+      payload.precio_venta = calcPrecioVentaSugerido({
+        precioCompra,
+        multiplicadorProducto: prod.multiplicador_venta,
+        multiplicadorProveedor,
+      })
+    }
+
+    await supabase.from('productos').update(payload).eq('id', linea.producto_id)
   }
-
-  return { data: fp, error: null }
-}
-
-// ── Albaranes de proveedor ─────────────────────────────
-// El albarán registra la mercancía en cuanto llega (y suma el
-// stock en ese momento). La factura, cuando llega después, se
-// genera agrupando uno o varios albaranes ya recibidos — sin
-// volver a tocar el stock, porque ya se sumó al recibir cada uno.
-
-export const getAlbaranesProveedor = async (empresaId) => {
-  const { data, error } = await supabase
-    .from('albaranes_proveedor')
-    .select('*, proveedores(nombre)')
-    .eq('empresa_id', empresaId)
-    .order('fecha_albaran', { ascending: false })
-  return { data: data || [], error }
-}
-
-// Albaranes de un proveedor concreto que aún no se han facturado
-export const getAlbaranesPendientes = async (empresaId, proveedorId) => {
-  const { data, error } = await supabase
-    .from('albaranes_proveedor')
-    .select('*, lineas_albaran_proveedor(*)')
-    .eq('empresa_id', empresaId)
-    .eq('proveedor_id', proveedorId)
-    .eq('estado', 'pendiente')
-    .order('fecha_albaran', { ascending: true })
-  return { data: data || [], error }
-}
-
-export const createAlbaranProveedor = async (albaran, lineas) => {
-  const { data: alb, error: errAlb } = await supabase
-    .from('albaranes_proveedor')
-    .insert(albaran)
-    .select()
-    .single()
-  if (errAlb) return { data: null, error: errAlb }
-
-  const items = lineas.map((l, i) => ({ ...l, albaran_id: alb.id, orden: i }))
-  const { error: errL } = await supabase.from('lineas_albaran_proveedor').insert(items)
-  if (errL) return { data: null, error: errL }
-
-  // La mercancía ya ha llegado físicamente, así que el stock se
-  // suma ahora — no se espera a que llegue la factura.
-  for (const l of lineas.filter(l => l.producto_id)) {
-    await supabase.rpc('mover_stock', {
-      p_producto_id: l.producto_id,
-      p_delta: Number(l.cantidad),
-      p_tipo: 'entrada',
-      p_referencia_id: alb.id,
-      p_referencia_tipo: 'albaran',
-      p_notas: `Albarán ${albaran.numero || alb.id.slice(0, 8)}`,
-    })
-  }
-
-  return { data: alb, error: null }
-}
-
-export const deleteAlbaranProveedor = async (id) => {
-  const { error } = await supabase.from('albaranes_proveedor').delete().eq('id', id)
-  return { error }
-}
-
-// Crea la factura de proveedor a partir de uno o varios albaranes ya
-// recibidos, con las líneas que pases (el importe puede haberse
-// editado a mano respecto al albarán — el precio en el albarán es
-// el que se esperaba, el de la factura es el que cobra el proveedor
-// de verdad). Crea la factura SIN volver a tocar el stock, y marca
-// los albaranes usados como 'facturado' para que dejen de aparecer
-// como pendientes.
-export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) => {
-  const { data: fp, error: errFp } = await supabase
-    .from('facturas_proveedor')
-    .insert(factura)
-    .select()
-    .single()
-  if (errFp) return { data: null, error: errFp }
-
-  const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
-  const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
-  if (errL) return { data: null, error: errL }
-
-  const { error: errUpd } = await supabase
-    .from('albaranes_proveedor')
-    .update({ estado: 'facturado', factura_id: fp.id })
-    .in('id', albaranIds)
-  if (errUpd) return { data: null, error: errUpd }
 
   return { data: fp, error: null }
 }
@@ -463,13 +403,17 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 
   // 2. Revertir stock de los conceptos originales con producto
   for (const c of (conceptosOriginales || []).filter(c => c.producto_id)) {
-    await supabase.rpc('mover_stock', {
-      p_producto_id: c.producto_id,
-      p_delta: Number(c.cantidad), // devolver lo que se descontó
-      p_tipo: 'ajuste_positivo',
-      p_referencia_id: facturaId,
-      p_referencia_tipo: 'factura',
-      p_notas: 'Reversión por edición de factura',
+    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
+    if (!prod) continue
+    const anterior  = Number(prod.stock_actual)
+    const posterior = anterior + Number(c.cantidad) // devolver lo que se descontó
+    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
+    await supabase.from('movimientos_stock').insert({
+      empresa_id: empresaId, producto_id: c.producto_id,
+      tipo: 'ajuste_positivo', cantidad: Number(c.cantidad),
+      stock_anterior: anterior, stock_posterior: posterior,
+      referencia_id: facturaId, referencia_tipo: 'factura',
+      notas: 'Reversión por edición de factura',
     })
   }
 
@@ -481,41 +425,29 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 
   // 4. Descontar stock de los nuevos conceptos con producto
   for (const c of conceptosNuevos.filter(c => c.producto_id)) {
-    await supabase.rpc('mover_stock', {
-      p_producto_id: c.producto_id,
-      p_delta: -Number(c.cantidad),
-      p_tipo: 'salida_factura',
-      p_referencia_id: facturaId,
-      p_referencia_tipo: 'factura',
-      p_notas: 'Edición de factura',
+    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
+    if (!prod) continue
+    const anterior  = Number(prod.stock_actual)
+    const posterior = anterior - Number(c.cantidad)
+    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
+    await supabase.from('movimientos_stock').insert({
+      empresa_id: empresaId, producto_id: c.producto_id,
+      tipo: 'salida_factura', cantidad: -Number(c.cantidad),
+      stock_anterior: anterior, stock_posterior: posterior,
+      referencia_id: facturaId, referencia_tipo: 'factura',
+      notas: 'Edición de factura',
     })
   }
 
   return { error: null }
 }
 
-// ── Verificación pública de facturas (para /verificar) ─
-export const verificarFactura = async ({ folio, nif, total, fecha }) => {
-  const { data, error } = await supabase.rpc('verificar_factura', {
-    p_folio: folio,
-    p_nif:   nif,
-    p_total: total,
-    p_fecha: fecha,
-  })
-  if (error) return { data: null, error }
-  return { data: data?.[0] || null, error: null }
-}
-
 // ── Envío de email ─────────────────────────────────────
 export const enviarEmail = async ({ to, subject, html, fromName }) => {
   try {
-    const { data: { session } } = await supabase.auth.getSession()
     const res = await fetch('/api/send-email', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ to, subject, html, fromName }),
     })
     const data = await res.json()
