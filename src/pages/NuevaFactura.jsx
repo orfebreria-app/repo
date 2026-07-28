@@ -101,6 +101,12 @@ export default function NuevaFactura({ session }) {
       folio = folioReservado
     }
 
+    if (!folio) {
+      setError('No se pudo generar el número de factura. Inténtalo de nuevo.')
+      setSaving(false)
+      return
+    }
+
     const facturaData = {
       empresa_id: empresa.id, cliente_id: form.cliente_id,
       folio, fecha_emision: form.fecha_emision,

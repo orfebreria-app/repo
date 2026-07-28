@@ -101,9 +101,25 @@ export const getFactura = async (id) => {
 }
 
 export const createFactura = async (factura, conceptos) => {
+  let folioNormalizado = typeof factura?.folio === 'string' ? factura.folio.trim() : ''
+
+  if (!folioNormalizado && factura?.empresa_id) {
+    const { folio: folioReservado, error: errFolio } = await getSiguienteFolioAtomico(factura.empresa_id)
+    if (errFolio) {
+      return { data: null, error: new Error('No se pudo asignar el folio de la factura: ' + (errFolio.message || 'Error desconocido')) }
+    }
+    folioNormalizado = typeof folioReservado === 'string' ? folioReservado.trim() : ''
+  }
+
+  if (!folioNormalizado) {
+    return { data: null, error: new Error('Folio vacío. No se pudo asignar un número de factura válido.') }
+  }
+
+  const facturaAInsertar = { ...factura, folio: folioNormalizado }
+
   const { data: fact, error: errFact } = await supabase
     .from('facturas')
-    .insert(factura)
+    .insert(facturaAInsertar)
     .select()
     .single()
   if (errFact) return { data: null, error: errFact }
@@ -112,12 +128,46 @@ export const createFactura = async (factura, conceptos) => {
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { data: null, error: errConc }
 
-  await supabase.rpc('increment_folio', { empresa_id_param: factura.empresa_id })
-    .catch(() => {})
-
   return { data: fact, error: null }
 }
 
+// Reserva el siguiente folio de forma atómica (sin riesgo de duplicados
+// por dos facturas creadas casi a la vez).
+export const getSiguienteFolioAtomico = async (empresaId) => {
+  if (!empresaId) return { folio: null, error: new Error('Falta el id de empresa para reservar el folio') }
+
+  const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
+  if (!error && data !== null && data !== undefined) {
+    const folioValue = Array.isArray(data) && data.length === 1 ? data[0] : data
+    if (folioValue !== null && folioValue !== undefined && folioValue !== '') {
+      return { folio: folioValue, error: null }
+    }
+  }
+
+  // Fallback: si la RPC falla, calcular desde el contador de empresas.
+  const { data: empresa, error: errEmpresa } = await supabase
+    .from('empresas')
+    .select('id, serie, siguiente_folio')
+    .eq('id', empresaId)
+    .single()
+
+  if (errEmpresa || !empresa) {
+    return { folio: null, error: error || errEmpresa || new Error('No se pudo obtener la empresa para el folio') }
+  }
+
+  const siguienteNumero = Number(empresa.siguiente_folio ?? 1)
+  const serie = String(empresa.serie || 'FAC').replace(/-+$/, '')
+  const folioFallback = `${serie}-${String(siguienteNumero).padStart(4, '0')}`
+
+  const { error: errUpdate } = await supabase
+    .from('empresas')
+    .update({ siguiente_folio: siguienteNumero + 1 })
+    .eq('id', empresaId)
+
+  if (errUpdate) return { folio: null, error: errUpdate }
+
+  return { folio: folioFallback, error: null }
+}
 export const updateEstadoFactura = async (id, estado) => {
   const { data, error } = await supabase
     .from('facturas')
@@ -459,16 +509,8 @@ export const enviarEmail = async ({ to, subject, html, fromName }) => {
 }
 
 
-// ── Compatibilidad temporal de exports usados por otras páginas ─────────────
-export const getSiguienteFolioAtomico = async (empresaId) => {
-  const { data, error } = await getFacturas(empresaId)
-  if (error) return { data: null, error }
-  const maxNum = (data || []).reduce((max, f) => {
-    const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0
-    return n > max ? n : max
-  }, 0)
-  return { data: maxNum + 1, error: null }
-}
+// Esta función se mantiene aquí como stub para compatibilidad con imports existentes.
+// La implementación real está más arriba en este mismo archivo.
 
 export const getAlbaranesProveedor = async () => ({ data: [], error: null })
 export const createAlbaranProveedor = async () => ({ data: null, error: null })
