@@ -227,8 +227,9 @@ export const isLocalDevMode = () => {
   const vercelHostedApp = currentHost.endsWith('.vercel.app') || currentHost.endsWith('.vercel.dev') || currentHost.includes('vercel') || currentUrl.includes('vercel.app') || currentUrl.includes('vercel.dev')
   const vercelLikeHostname = currentHost.includes('repo-juq1') || currentHost.includes('vercel')
   const testEnvironment = import.meta.env.MODE === 'test' || (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test')
-  const demoSignal = import.meta.env.DEV || testEnvironment || localHost || vercelHostedApp || vercelLikeHostname
-  return demoSignal && (bypassEnabled || missingSupabaseConfig || localHost || vercelHostedApp || vercelLikeHostname || testEnvironment)
+  const localOrTest = import.meta.env.DEV || testEnvironment || localHost
+  const publicHostWithoutBackend = (vercelHostedApp || vercelLikeHostname) && missingSupabaseConfig
+  return bypassEnabled || localOrTest || publicHostWithoutBackend
 }
 
 export const notifyFacturasUpdated = () => {
