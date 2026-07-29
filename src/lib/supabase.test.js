@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createSupabaseClient, getEmpresa, getFacturas, isLocalDevMode } from './supabase'
+import { createSupabaseClient, construirFolioFactura, getEmpresa, getFacturas, isLocalDevMode, resolverFolioFactura } from './supabase'
 
 describe('supabase local demo helpers', () => {
   beforeEach(() => {
@@ -34,6 +34,11 @@ describe('supabase local demo helpers', () => {
 
     expect(error).toBeNull()
     expect(data?.nombre).toBe('Empresa Demo')
+  })
+
+  it('builds and resolves invoice numbers deterministically', () => {
+    expect(construirFolioFactura({ folio: '', serie: 'FAC', fallbackNumero: 3 })).toBe('FAC-0003')
+    expect(resolverFolioFactura({ folio: '', serie: 'FAC', existingFolios: ['FAC-0001', 'FAC-0003'] })).toBe('FAC-0004')
   })
 
   it('seeds demo invoices so the invoices page is not empty in public demo mode', async () => {

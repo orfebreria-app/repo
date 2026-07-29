@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro, construirFolioFactura, resolverFolioFactura } from '../lib/supabase'
 import { calcLinea, calcularTotalesFactura, tasaRE } from '../lib/calculos'
 import { format, addDays } from 'date-fns'
 
@@ -19,6 +19,7 @@ export default function NuevaFactura({ session }) {
   const [empresa,   setEmpresa]   = useState(null)
   const [clientes,  setClientes]  = useState([])
   const [productos, setProductos] = useState([])
+  const [facturasExistentes, setFacturasExistentes] = useState([])
   const [loading,   setLoading]   = useState(true)
   const [saving,    setSaving]    = useState(false)
   const [error,     setError]     = useState('')
@@ -50,6 +51,7 @@ export default function NuevaFactura({ session }) {
         ])
         setClientes(cls)
         setProductos(prods || [])
+        setFacturasExistentes(facts || [])
         // Calcular el siguiente folio real mirando las facturas existentes
         const maxNum = (facts || []).reduce((max, f) => {
           const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0

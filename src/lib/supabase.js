@@ -256,7 +256,7 @@ const normalizarFacturaParaInsert = (factura, folio) => {
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null))
 }
 
-const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
+export const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
   const folioNormalizado = (folio || '').trim()
   if (folioNormalizado) return folioNormalizado
   const serieBase = (serie || 'FAC').trim() || 'FAC'
@@ -265,7 +265,7 @@ const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
   return `${serieBase}-${String(numeroValido).padStart(4, '0')}`
 }
 
-const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
+export const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
   const folioNormalizado = (folio || '').trim()
   if (folioNormalizado) {
     const existentes = new Set((existingFolios || []).map(item => (item || '').trim()).filter(Boolean))
