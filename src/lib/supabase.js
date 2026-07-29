@@ -129,12 +129,14 @@ export const isLocalDevMode = () => {
   const locationRef = typeof window !== 'undefined' && window.location
     ? window.location
     : (typeof globalThis !== 'undefined' && globalThis.location ? globalThis.location : null)
-  const currentHost = locationRef?.hostname || ''
-  const currentUrl = locationRef?.href || ''
-  const localHost = ['localhost', '127.0.0.1'].includes(currentHost)
-  const vercelHostedApp = currentHost.includes('vercel.app') || currentHost.includes('vercel.dev') || currentUrl.includes('vercel.app') || currentUrl.includes('vercel.dev')
+  const currentHost = String(locationRef?.hostname || '').toLowerCase()
+  const currentUrl = String(locationRef?.href || '').toLowerCase()
+  const localHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(currentHost)
+  const vercelHostedApp = currentHost.endsWith('.vercel.app') || currentHost.endsWith('.vercel.dev') || currentHost.includes('vercel') || currentUrl.includes('vercel.app') || currentUrl.includes('vercel.dev')
   const vercelLikeHostname = currentHost.includes('repo-juq1') || currentHost.includes('vercel')
-  return (import.meta.env.DEV || vercelHostedApp || vercelLikeHostname) && (bypassEnabled || missingSupabaseConfig || localHost || vercelHostedApp || vercelLikeHostname)
+  const testEnvironment = import.meta.env.MODE === 'test' || (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test')
+  const demoSignal = import.meta.env.DEV || testEnvironment || localHost || vercelHostedApp || vercelLikeHostname
+  return demoSignal && (bypassEnabled || missingSupabaseConfig || localHost || vercelHostedApp || vercelLikeHostname || testEnvironment)
 }
 
 export const notifyFacturasUpdated = () => {
