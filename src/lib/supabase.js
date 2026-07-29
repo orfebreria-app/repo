@@ -77,12 +77,24 @@ export const deleteCliente = async (id) => {
 
 // ── Facturas helpers ──────────────────────────────────
 export const getFacturas = async (empresaId) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const data = (state.facturas || [])
+      .filter(f => f.empresa_id === empresaId || f.empresa_id === 'local-demo-company' || f.empresa_id === 'demo-company')
+      .map(f => ({ ...f, clientes: { nombre: 'Cliente Demo', email: 'cliente@demo.test' } }))
+      .sort((a, b) => {
+        const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
+        const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
+        return numB - numA
+      })
+    return { data, error: null }
+  }
+
   const { data, error } = await supabase
     .from('facturas')
     .select(`*, clientes(nombre, email)`)
     .eq('empresa_id', empresaId)
     .order('fecha_emision', { ascending: false })
-  // Ordenar por número extraído del folio (FAC-0012 → 12)
   const sorted = (data || []).sort((a, b) => {
     const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
     const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
@@ -101,50 +113,78 @@ export const getFactura = async (id) => {
 }
 
 export const createFactura = async (factura, conceptos) => {
-  let folioNormalizado = typeof factura?.folio === 'string' ? factura.folio.trim() : ''
+  try {
+    const folio = construirFolioFactura({
+      folio: factura?.folio,
+      serie: factura?.serie || factura?.empresa?.serie,
+      fallbackNumero: factura?.folio_numero ?? Date.now(),
+    })
 
-  if (!folioNormalizado && factura?.empresa_id) {
-    const { folio: folioReservado, error: errFolio } = await getSiguienteFolioAtomico(factura.empresa_id)
-    if (errFolio) {
-      return { data: null, error: new Error('No se pudo asignar el folio de la factura: ' + (errFolio.message || 'Error desconocido')) }
+    const facturaSegura = normalizarFacturaParaInsert(factura, folio)
+
+    if (isLocalDevMode()) {
+      const state = getLocalDevState()
+      const fact = {
+        ...facturaSegura,
+        id: `factura-local-${Date.now()}`,
+        created_at: new Date().toISOString(),
+        hash: null,
+      }
+      state.facturas = [
+        ...state.facturas.filter(f => f.id !== fact.id),
+        fact,
+      ]
+      state.conceptos = [
+        ...state.conceptos.filter(c => c.factura_id !== fact.id),
+        ...conceptos.map((c, i) => ({ ...c, factura_id: fact.id, orden: i, id: `${fact.id}-linea-${i + 1}` })),
+      ]
+      writeLocalDevState(state)
+      notifyFacturasUpdated()
+      return { data: fact, error: null }
     }
-    folioNormalizado = typeof folioReservado === 'string' ? folioReservado.trim() : ''
+
+    const { data: fact, error: errFact } = await supabase
+      .from('facturas')
+      .insert(facturaSegura)
+      .select()
+      .single()
+
+    if (errFact) return { data: null, error: errFact }
+
+    const items = conceptos.map((c, i) => ({ ...c, factura_id: fact.id, orden: i }))
+    const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
+    if (errConc) {
+      await supabase.from('facturas').delete().eq('id', fact.id)
+      return { data: null, error: errConc }
+    }
+
+    notifyFacturasUpdated()
+    return { data: fact, error: null }
+  } catch (err) {
+    return { data: null, error: err }
   }
-
-  if (!folioNormalizado) {
-    return { data: null, error: new Error('Folio vacío. No se pudo asignar un número de factura válido.') }
-  }
-
-  const facturaAInsertar = { ...factura, folio: folioNormalizado }
-
-  const { data: fact, error: errFact } = await supabase
-    .from('facturas')
-    .insert(facturaAInsertar)
-    .select()
-    .single()
-  if (errFact) return { data: null, error: errFact }
-
-  const items = conceptos.map((c, i) => ({ ...c, factura_id: fact.id, orden: i }))
-  const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
-  if (errConc) return { data: null, error: errConc }
-
-  return { data: fact, error: null }
 }
 
 // Reserva el siguiente folio de forma atómica (sin riesgo de duplicados
 // por dos facturas creadas casi a la vez).
 export const getSiguienteFolioAtomico = async (empresaId) => {
-  if (!empresaId) return { folio: null, error: new Error('Falta el id de empresa para reservar el folio') }
-
-  const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
-  if (!error && data !== null && data !== undefined) {
-    const folioValue = Array.isArray(data) && data.length === 1 ? data[0] : data
-    if (folioValue !== null && folioValue !== undefined && folioValue !== '') {
-      return { folio: folioValue, error: null }
-    }
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const facturas = (state.facturas || []).filter(f => f.empresa_id === empresaId)
+    const maxNum = facturas.reduce((max, f) => {
+      const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0
+      return n > max ? n : max
+    }, 0)
+    return { folio: maxNum + 1, error: null }
   }
 
-  // Fallback: si la RPC falla, calcular desde el contador de empresas.
+  if (!empresaId) return { folio: null, error: new Error('Falta el id de empresa para reservar el folio') }
+
+  try {
+    const { data, error } = await supabase.rpc('siguiente_folio_atomico', { p_empresa_id: empresaId })
+    if (!error && data != null) return { folio: data, error: null }
+  } catch {}
+
   const { data: empresa, error: errEmpresa } = await supabase
     .from('empresas')
     .select('id, serie, siguiente_folio')
@@ -152,7 +192,19 @@ export const getSiguienteFolioAtomico = async (empresaId) => {
     .single()
 
   if (errEmpresa || !empresa) {
-    return { folio: null, error: error || errEmpresa || new Error('No se pudo obtener la empresa para el folio') }
+    const { data: facturas, error: errFacturas } = await supabase
+      .from('facturas')
+      .select('folio')
+      .eq('empresa_id', empresaId)
+
+    if (errFacturas) return { folio: null, error: errFacturas }
+
+    const maxNum = (facturas || []).reduce((max, f) => {
+      const n = parseInt((f.folio || '').replace(/\D/g, '')) || 0
+      return n > max ? n : max
+    }, 0)
+
+    return { folio: maxNum + 1, error: null }
   }
 
   const siguienteNumero = Number(empresa.siguiente_folio ?? 1)

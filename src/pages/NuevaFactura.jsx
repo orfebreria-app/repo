@@ -94,47 +94,76 @@ export default function NuevaFactura({ session }) {
 
     setSaving(true)
 
-    let folio = folioEditado.trim()
-    if (!folio) {
-      const { folio: folioReservado, error: errFolio } = await getSiguienteFolioAtomico(empresa.id)
-      if (errFolio) { setError('No se pudo asignar el número de factura: ' + errFolio.message); setSaving(false); return }
-      folio = folioReservado
-    }
+    try {
+      let folio = (folioEditado || '').trim()
+      let folioReservado = null
 
-    if (!folio) {
-      setError('No se pudo generar el número de factura. Inténtalo de nuevo.')
-      setSaving(false)
-      return
-    }
-
-    const facturaData = {
-      empresa_id: empresa.id, cliente_id: form.cliente_id,
-      folio, fecha_emision: form.fecha_emision,
-      fecha_vencimiento: form.fecha_vencimiento || null,
-      estado: form.estado, subtotal, iva_total: ivaTotal,
-      recargo_total: reTotal,
-      total, notas: form.notas,
-    }
-    const conceptos = lineas.map(l => {
-      const base = calcLinea(l)
-      const reImporte = clienteRE ? +(base * tasaRE(l.iva_tasa) / 100).toFixed(2) : 0
-      return {
-        descripcion: l.descripcion, cantidad: Number(l.cantidad),
-        precio_unitario: Number(l.precio_unitario), iva_tasa: Number(l.iva_tasa),
-        descuento: Number(l.descuento), subtotal: base,
-        recargo_tasa: clienteRE ? tasaRE(l.iva_tasa) : 0,
-        recargo_importe: reImporte,
-        producto_id: l.producto_id || null,
+      if (!folio) {
+        const { folio: folioObtenido, error: errFolio } = await getSiguienteFolioAtomico(empresa.id)
+        if (!errFolio && folioObtenido != null) {
+          folioReservado = folioObtenido
+        } else {
+          folioReservado = siguienteFolio || 1
+        }
       }
-    })
 
-    const { data: fact, error: err } = await createFactura(facturaData, conceptos)
-    if (err) { setError(err.message); setSaving(false); return }
+      folio = construirFolioFactura({
+        folio: folio || folioReservado,
+        serie: empresa?.serie,
+        fallbackNumero: folioReservado ?? siguienteFolio ?? 1,
+      })
 
-    // Descontar stock
-    await descontarStockVenta(empresa.id, lineas, fact.id, 'factura')
+      folio = resolverFolioFactura({
+        folio,
+        serie: empresa?.serie,
+        existingFolios: facturasExistentes.map(f => f.folio),
+      })
 
-    navigate('/facturas')
+      const cliente = clientes.find(c => c.id === form.cliente_id)
+      if (!cliente) throw new Error('Cliente no encontrado')
+
+      const facturaData = {
+        empresa_id: empresa.id,
+        cliente_id: form.cliente_id,
+        folio,
+        fecha_emision: form.fecha_emision,
+        fecha_vencimiento: form.fecha_vencimiento || null,
+        cliente_nif: cliente.nif || '',
+        cliente_nombre: cliente.nombre || '',
+        cliente_email: cliente.email || '',
+        estado: form.estado,
+        subtotal,
+        iva_total: ivaTotal,
+        total,
+        notas: form.notas,
+      }
+
+      const conceptos = lineas.map(l => {
+        const base = calcLinea(l)
+        const reImporte = clienteRE ? +(base * tasaRE(l.iva_tasa) / 100).toFixed(2) : 0
+        return {
+          descripcion: l.descripcion,
+          cantidad: Number(l.cantidad),
+          precio_unitario: Number(l.precio_unitario),
+          iva_tasa: Number(l.iva_tasa),
+          descuento: Number(l.descuento),
+          subtotal: base,
+          recargo_tasa: clienteRE ? tasaRE(l.iva_tasa) : 0,
+          recargo_importe: reImporte,
+          producto_id: l.producto_id || null,
+        }
+      })
+
+      const { data: fact, error: err } = await createFactura(facturaData, conceptos)
+      if (err) throw new Error(err.message)
+
+      navigate('/facturas')
+    } catch (err) {
+      setError(err.message || 'Error desconocido')
+      console.error('Error al guardar factura:', err)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <Skeleton />
