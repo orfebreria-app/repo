@@ -257,16 +257,22 @@ const normalizarFacturaParaInsert = (factura, folio) => {
 }
 
 export const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
-  const folioNormalizado = (folio || '').trim()
-  if (folioNormalizado) return folioNormalizado
+  const folioNormalizado = String(folio ?? '').trim()
   const serieBase = (serie || 'FAC').trim() || 'FAC'
+  if (folioNormalizado) {
+    const numeroSimple = Number(folioNormalizado)
+    if (Number.isFinite(numeroSimple) && numeroSimple > 0 && /^\d+$/.test(folioNormalizado)) {
+      return `${serieBase}-${String(numeroSimple).padStart(4, '0')}`
+    }
+    return folioNormalizado
+  }
   const numero = Number(fallbackNumero)
   const numeroValido = Number.isFinite(numero) && numero > 0 ? numero : 1
   return `${serieBase}-${String(numeroValido).padStart(4, '0')}`
 }
 
 export const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
-  const folioNormalizado = (folio || '').trim()
+  const folioNormalizado = String(folio ?? '').trim()
   if (folioNormalizado) {
     const existentes = new Set((existingFolios || []).map(item => (item || '').trim()).filter(Boolean))
     if (!existentes.has(folioNormalizado)) return folioNormalizado

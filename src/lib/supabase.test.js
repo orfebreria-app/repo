@@ -38,6 +38,7 @@ describe('supabase local demo helpers', () => {
 
   it('builds and resolves invoice numbers deterministically', () => {
     expect(construirFolioFactura({ folio: '', serie: 'FAC', fallbackNumero: 3 })).toBe('FAC-0003')
+    expect(construirFolioFactura({ folio: 3, serie: 'FAC', fallbackNumero: 1 })).toBe('FAC-0003')
     expect(resolverFolioFactura({ folio: '', serie: 'FAC', existingFolios: ['FAC-0001', 'FAC-0003'] })).toBe('FAC-0004')
   })
 
