@@ -44,6 +44,6 @@ describe('supabase local demo helpers', () => {
     expect(error).toBeNull()
     expect(Array.isArray(data)).toBe(true)
     expect(data.length).toBeGreaterThan(0)
-    expect(data[0].folio).toBe('FAC-0001')
+    expect(data[0].folio).toBe('FAC-0002')
   })
 })
