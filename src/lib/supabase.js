@@ -66,6 +66,19 @@ export const createSupabaseClient = (url = supabaseUrl, key = supabaseKey) => {
 }
 
 const createDemoState = () => ({
+  empresa: {
+    id: 'local-demo-company',
+    user_id: 'demo-user',
+    nombre: 'Empresa Demo',
+    nif: 'B00000000',
+    email: 'empresa@demo.test',
+    telefono: '',
+    direccion: '',
+    serie: 'FAC',
+    siguiente_folio: 1,
+    activo: true,
+    factura_config: {},
+  },
   clientes: [{
     id: 'cliente-demo-1',
     empresa_id: 'local-demo-company',
@@ -90,6 +103,8 @@ const createDemoState = () => ({
   }],
   facturas: [],
   conceptos: [],
+  tickets: [],
+  lineas_ticket: [],
 })
 
 const readLocalDevState = () => {
@@ -115,8 +130,20 @@ const getLocalDevState = () => {
   if (memoryLocalDevState) return memoryLocalDevState
   const persisted = readLocalDevState()
   if (persisted) {
-    memoryLocalDevState = persisted
-    return memoryLocalDevState
+    const normalized = {
+      ...createDemoState(),
+      ...persisted,
+      empresa: persisted.empresa || createDemoState().empresa,
+      clientes: persisted.clientes || [],
+      productos: persisted.productos || [],
+      facturas: persisted.facturas || [],
+      conceptos: persisted.conceptos || [],
+      tickets: persisted.tickets || [],
+      lineas_ticket: persisted.lineas_ticket || [],
+    }
+    memoryLocalDevState = normalized
+    writeLocalDevState(normalized)
+    return normalized
   }
   const fresh = createDemoState()
   writeLocalDevState(fresh)
@@ -225,6 +252,13 @@ export const getUser = () =>
 
 // ── Empresa helpers ───────────────────────────────────
 export const getEmpresa = async (userId) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const empresa = state.empresa
+    const matches = !userId || empresa?.user_id === userId || empresa?.id === userId
+    return { data: matches ? empresa : null, error: null }
+  }
+
   const { data, error } = await supabase
     .from('empresas')
     .select('*')
@@ -244,6 +278,14 @@ export const upsertEmpresa = async (empresa) => {
 
 // ── Clientes helpers ──────────────────────────────────
 export const getClientes = async (empresaId) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const data = (state.clientes || [])
+      .filter(cliente => cliente.empresa_id === empresaId || cliente.empresa_id === 'local-demo-company')
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    return { data, error: null }
+  }
+
   const { data, error } = await supabase
     .from('clientes')
     .select('*')
@@ -295,6 +337,21 @@ export const getFacturas = async (empresaId) => {
 }
 
 export const getFactura = async (id) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const factura = (state.facturas || []).find(item => item.id === id)
+    if (!factura) return { data: null, error: null }
+    const conceptos = (state.conceptos || []).filter(item => item.factura_id === id)
+    return {
+      data: {
+        ...factura,
+        clientes: state.clientes?.find(cliente => cliente.id === factura.cliente_id) || null,
+        conceptos_factura: conceptos,
+      },
+      error: null,
+    }
+  }
+
   const { data, error } = await supabase
     .from('facturas')
     .select(`*, clientes(*), conceptos_factura(*)`)
@@ -446,6 +503,21 @@ export const calcPrecioVentaSugerido = ({ precioCompra = 0, multiplicadorProduct
 
 // ── Proveedores ───────────────────────────────────────
 export const getProveedores = async (empresaId) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const data = (state.productos || [])
+      .filter(producto => producto.empresa_id === empresaId || producto.empresa_id === 'local-demo-company')
+      .map(producto => ({
+        id: `${producto.id}-proveedor`,
+        empresa_id: empresaId,
+        nombre: producto.proveedores?.nombre || 'Proveedor Demo',
+        activo: true,
+      }))
+      .filter((prov, index, arr) => arr.findIndex(item => item.nombre === prov.nombre) === index)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    return { data, error: null }
+  }
+
   const { data, error } = await supabase
     .from('proveedores')
     .select('*')
@@ -471,6 +543,15 @@ export const deleteProveedor = async (id) => {
 
 // ── Productos ─────────────────────────────────────────
 export const getProductos = async (empresaId) => {
+  if (isLocalDevMode()) {
+    const state = getLocalDevState()
+    const data = (state.productos || [])
+      .filter(producto => producto.empresa_id === empresaId || producto.empresa_id === 'local-demo-company')
+      .filter(producto => producto.activo !== false)
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+    return { data, error: null }
+  }
+
   const { data, error } = await supabase
     .from('productos')
     .select('*, proveedores(nombre)')

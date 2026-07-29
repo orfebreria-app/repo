@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createSupabaseClient, getFacturas, isLocalDevMode } from './supabase'
+import { createSupabaseClient, getEmpresa, getFacturas, isLocalDevMode } from './supabase'
 
 describe('supabase local demo helpers', () => {
   beforeEach(() => {
@@ -25,6 +25,15 @@ describe('supabase local demo helpers', () => {
 
     const sessionResult = await client.auth.getSession()
     expect(sessionResult.error).toBeNull()
+  })
+
+  it('returns a demo company in local demo mode so the dashboard and invoices can load', async () => {
+    expect(isLocalDevMode()).toBe(true)
+
+    const { data, error } = await getEmpresa('demo-user')
+
+    expect(error).toBeNull()
+    expect(data?.nombre).toBe('Empresa Demo')
   })
 
   it('activates local demo mode on localhost and returns invoices from local storage', async () => {
