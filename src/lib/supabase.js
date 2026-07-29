@@ -6,6 +6,65 @@ const supabaseKey  = import.meta.env.VITE_SUPABASE_ANON_KEY
 const localDevStoreKey = 'facturacion-app-local-dev-store'
 let memoryLocalDevState = null
 
+const hasValidSupabaseConfig = (url = supabaseUrl, key = supabaseKey) => {
+  const normalizedUrl = String(url || '').trim()
+  const normalizedKey = String(key || '').trim()
+  if (!normalizedUrl || !normalizedKey) return false
+  if (normalizedUrl.includes('xxxxxxxx') || normalizedUrl.includes('your-project')) return false
+  if (normalizedKey.includes('your-anon-key') || normalizedKey.includes('xxxx')) return false
+  return true
+}
+
+const createFallbackQueryBuilder = () => {
+  const builder = {
+    select: () => builder,
+    eq: () => builder,
+    order: () => builder,
+    limit: () => builder,
+    single: async () => ({ data: null, error: null }),
+    insert: () => builder,
+    update: () => builder,
+    upsert: () => builder,
+    delete: () => builder,
+  }
+  return builder
+}
+
+export const createSupabaseClient = (url = supabaseUrl, key = supabaseKey) => {
+  if (!hasValidSupabaseConfig(url, key)) {
+    return {
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        signInWithPassword: async () => ({ data: { user: null, session: null }, error: null }),
+        signUp: async () => ({ data: { user: null, session: null }, error: null }),
+        signOut: async () => ({ error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+      },
+      from: () => createFallbackQueryBuilder(),
+      rpc: async () => ({ data: null, error: null }),
+    }
+  }
+
+  try {
+    return createClient(url, key)
+  } catch (error) {
+    console.warn('Supabase no disponible, usando cliente de respaldo.', error)
+    return {
+      auth: {
+        getSession: async () => ({ data: { session: null }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+        signInWithPassword: async () => ({ data: { user: null, session: null }, error: null }),
+        signUp: async () => ({ data: { user: null, session: null }, error: null }),
+        signOut: async () => ({ error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+      },
+      from: () => createFallbackQueryBuilder(),
+      rpc: async () => ({ data: null, error: null }),
+    }
+  }
+}
+
 const createDemoState = () => ({
   clientes: [{
     id: 'cliente-demo-1',
@@ -133,11 +192,11 @@ const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
   return `${serieBase}-${String(maxNumero + 1).padStart(4, '0')}`
 }
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error('⚠️ Faltan variables de entorno de Supabase. Crea un archivo .env basado en .env.example')
+if (!hasValidSupabaseConfig(supabaseUrl, supabaseKey)) {
+  console.warn('⚠️ Faltan variables de entorno de Supabase o están incompletas. La app seguirá en modo demo.')
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+export const supabase = createSupabaseClient(supabaseUrl, supabaseKey)
 
 // ── Recargo de Equivalencia ───────────────────────────
 // Devuelve la tasa RE correspondiente al IVA
