@@ -3,6 +3,136 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey  = import.meta.env.VITE_SUPABASE_ANON_KEY
 
+const localDevStoreKey = 'facturacion-app-local-dev-store'
+let memoryLocalDevState = null
+
+const createDemoState = () => ({
+  clientes: [{
+    id: 'cliente-demo-1',
+    empresa_id: 'local-demo-company',
+    nombre: 'Cliente Demo',
+    nif: 'B00000000',
+    email: 'cliente@demo.test',
+    activo: true,
+  }],
+  productos: [{
+    id: 'producto-demo-1',
+    empresa_id: 'local-demo-company',
+    nombre: 'Producto Demo',
+    referencia: 'DEM-001',
+    precio_venta: 100,
+    precio_compra: 70,
+    iva_tasa: 21,
+    categoria: 'Otros',
+    activo: true,
+    stock_actual: 10,
+    stock_minimo: 5,
+    proveedores: { nombre: 'Proveedor Demo' },
+  }],
+  facturas: [],
+  conceptos: [],
+})
+
+const readLocalDevState = () => {
+  try {
+    const raw = typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem(localDevStoreKey) : null
+    if (!raw) return null
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+const writeLocalDevState = (state) => {
+  memoryLocalDevState = state
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem(localDevStoreKey, JSON.stringify(state))
+    } catch {}
+  }
+}
+
+const getLocalDevState = () => {
+  if (memoryLocalDevState) return memoryLocalDevState
+  const persisted = readLocalDevState()
+  if (persisted) {
+    memoryLocalDevState = persisted
+    return memoryLocalDevState
+  }
+  const fresh = createDemoState()
+  writeLocalDevState(fresh)
+  return fresh
+}
+
+export const isLocalDevMode = () => {
+  const bypassEnabled = import.meta.env.VITE_DEV_BYPASS_AUTH === 'true'
+  const missingSupabaseConfig = !supabaseUrl || !supabaseKey || supabaseUrl.includes('xxxxxxxx')
+  const locationRef = typeof window !== 'undefined' && window.location
+    ? window.location
+    : (typeof globalThis !== 'undefined' && globalThis.location ? globalThis.location : null)
+  const currentHost = locationRef?.hostname || ''
+  const currentUrl = locationRef?.href || ''
+  const localHost = ['localhost', '127.0.0.1'].includes(currentHost)
+  const vercelHostedApp = currentHost.includes('vercel.app') || currentHost.includes('vercel.dev') || currentUrl.includes('vercel.app') || currentUrl.includes('vercel.dev')
+  const vercelLikeHostname = currentHost.includes('repo-juq1') || currentHost.includes('vercel')
+  return (import.meta.env.DEV || vercelHostedApp || vercelLikeHostname) && (bypassEnabled || missingSupabaseConfig || localHost || vercelHostedApp || vercelLikeHostname)
+}
+
+export const notifyFacturasUpdated = () => {
+  const target = typeof window !== 'undefined' ? window : globalThis
+  if (target && typeof target.dispatchEvent === 'function') {
+    target.dispatchEvent(new CustomEvent('facturas:updated'))
+  }
+}
+
+const normalizarFacturaParaInsert = (factura, folio) => {
+  const payload = {
+    empresa_id: factura?.empresa_id,
+    cliente_id: factura?.cliente_id,
+    folio,
+    fecha_emision: factura?.fecha_emision,
+    fecha_vencimiento: factura?.fecha_vencimiento,
+    estado: factura?.estado || 'emitida',
+    subtotal: Number(factura?.subtotal ?? 0),
+    iva_total: Number(factura?.iva_total ?? 0),
+    total: Number(factura?.total ?? 0),
+    notas: factura?.notas ?? null,
+    pdf_url: factura?.pdf_url ?? null,
+  }
+
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined && value !== null))
+}
+
+const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
+  const folioNormalizado = (folio || '').trim()
+  if (folioNormalizado) return folioNormalizado
+  const serieBase = (serie || 'FAC').trim() || 'FAC'
+  const numero = Number(fallbackNumero)
+  const numeroValido = Number.isFinite(numero) && numero > 0 ? numero : 1
+  return `${serieBase}-${String(numeroValido).padStart(4, '0')}`
+}
+
+const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
+  const folioNormalizado = (folio || '').trim()
+  if (folioNormalizado) {
+    const existentes = new Set((existingFolios || []).map(item => (item || '').trim()).filter(Boolean))
+    if (!existentes.has(folioNormalizado)) return folioNormalizado
+  }
+
+  const serieBase = (serie || 'FAC').trim() || 'FAC'
+  const numeros = (existingFolios || [])
+    .map(item => (item || '').trim())
+    .filter(Boolean)
+    .map(item => {
+      const match = item.match(/(\d+)(?!.*\d)/)
+      return match ? Number(match[1]) : null
+    })
+    .filter(num => Number.isFinite(num) && num > 0)
+
+  const maxNumero = numeros.length ? Math.max(...numeros) : 0
+  return `${serieBase}-${String(maxNumero + 1).padStart(4, '0')}`
+}
+
 if (!supabaseUrl || !supabaseKey) {
   console.error('⚠️ Faltan variables de entorno de Supabase. Crea un archivo .env basado en .env.example')
 }

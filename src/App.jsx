@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { supabase } from './lib/supabase'
+import { isLocalDevMode, supabase } from './lib/supabase'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -19,12 +19,18 @@ import Verificar from './pages/Verificar'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
+  const demoMode = isLocalDevMode()
 
   useEffect(() => {
+    if (demoMode) {
+      setSession({ user: { id: 'demo-user' } })
+      return
+    }
+
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
-  }, [])
+  }, [demoMode])
 
   // Ruta pública: accesible sin sesión, es a donde apunta el QR de las
   // facturas. Se comprueba ANTES de exigir login.
