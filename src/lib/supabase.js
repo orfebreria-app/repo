@@ -259,7 +259,7 @@ const normalizarFacturaParaInsert = (factura, folio) => {
 
 export const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
   const folioNormalizado = String(folio ?? '').trim()
-  const serieBase = (serie || 'FAC').trim() || 'FAC'
+  const serieBase = String(serie || 'FAC').trim().replace(/-+$/, '') || 'FAC'
   if (folioNormalizado) {
     const numeroSimple = Number(folioNormalizado)
     if (Number.isFinite(numeroSimple) && numeroSimple > 0 && /^\d+$/.test(folioNormalizado)) {
@@ -274,12 +274,8 @@ export const construirFolioFactura = ({ folio, serie, fallbackNumero }) => {
 
 export const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
   const folioNormalizado = String(folio ?? '').trim()
-  if (folioNormalizado) {
-    const existentes = new Set((existingFolios || []).map(item => (item || '').trim()).filter(Boolean))
-    if (!existentes.has(folioNormalizado)) return folioNormalizado
-  }
+  const serieBase = String(serie || 'FAC').trim().replace(/-+$/, '') || 'FAC'
 
-  const serieBase = (serie || 'FAC').trim() || 'FAC'
   const numeros = (existingFolios || [])
     .map(item => (item || '').trim())
     .filter(Boolean)
@@ -290,6 +286,11 @@ export const resolverFolioFactura = ({ folio, serie, existingFolios = [] }) => {
     .filter(num => Number.isFinite(num) && num > 0)
 
   const maxNumero = numeros.length ? Math.max(...numeros) : 0
+
+  if (folioNormalizado) {
+    const existentes = new Set((existingFolios || []).map(item => (item || '').trim()).filter(Boolean))
+    if (!existentes.has(folioNormalizado)) return folioNormalizado
+  }
   return `${serieBase}-${String(maxNumero + 1).padStart(4, '0')}`
 }
 

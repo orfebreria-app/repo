@@ -38,8 +38,10 @@ describe('supabase local demo helpers', () => {
 
   it('builds and resolves invoice numbers deterministically', () => {
     expect(construirFolioFactura({ folio: '', serie: 'FAC', fallbackNumero: 3 })).toBe('FAC-0003')
+    expect(construirFolioFactura({ folio: '', serie: 'FAC-', fallbackNumero: 3 })).toBe('FAC-0003')
     expect(construirFolioFactura({ folio: 3, serie: 'FAC', fallbackNumero: 1 })).toBe('FAC-0003')
     expect(resolverFolioFactura({ folio: '', serie: 'FAC', existingFolios: ['FAC-0001', 'FAC-0003'] })).toBe('FAC-0004')
+    expect(resolverFolioFactura({ folio: '', serie: 'FAC-', existingFolios: ['FAC--0078', 'FAC--0079'] })).toBe('FAC-0080')
   })
 
   it('seeds demo invoices so the invoices page is not empty in public demo mode', async () => {

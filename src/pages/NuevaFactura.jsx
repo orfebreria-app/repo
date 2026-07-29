@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro, construirFolioFactura, resolverFolioFactura } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, descontarStockVenta, formatEuro, construirFolioFactura, resolverFolioFactura } from '../lib/supabase'
 import { calcLinea, calcularTotalesFactura, tasaRE } from '../lib/calculos'
 import { format, addDays } from 'date-fns'
 
@@ -98,28 +98,29 @@ export default function NuevaFactura({ session }) {
 
     try {
       let folio = (folioEditado || '').trim()
-      let folioReservado = null
+      const existingFolios = facturasExistentes.map(f => f.folio)
 
-      if (!folio) {
-        const { folio: folioObtenido, error: errFolio } = await getSiguienteFolioAtomico(empresa.id)
-        if (!errFolio && folioObtenido != null) {
-          folioReservado = folioObtenido
-        } else {
-          folioReservado = siguienteFolio || 1
-        }
+      if (folio) {
+        folio = construirFolioFactura({
+          folio,
+          serie: empresa?.serie,
+          fallbackNumero: siguienteFolio ?? 1,
+        })
+
+        folio = resolverFolioFactura({
+          folio,
+          serie: empresa?.serie,
+          existingFolios,
+        })
+      } else {
+        // En modo automático usamos el máximo folio existente + 1
+        // para que la nueva factura aparezca como la más reciente.
+        folio = resolverFolioFactura({
+          folio: '',
+          serie: empresa?.serie,
+          existingFolios,
+        })
       }
-
-      folio = construirFolioFactura({
-        folio: folio || folioReservado,
-        serie: empresa?.serie,
-        fallbackNumero: folioReservado ?? siguienteFolio ?? 1,
-      })
-
-      folio = resolverFolioFactura({
-        folio,
-        serie: empresa?.serie,
-        existingFolios: facturasExistentes.map(f => f.folio),
-      })
 
       const cliente = clientes.find(c => c.id === form.cliente_id)
       if (!cliente) throw new Error('Cliente no encontrado')
