@@ -36,12 +36,14 @@ describe('supabase local demo helpers', () => {
     expect(data?.nombre).toBe('Empresa Demo')
   })
 
-  it('activates local demo mode on localhost and returns invoices from local storage', async () => {
+  it('seeds demo invoices so the invoices page is not empty in public demo mode', async () => {
     expect(isLocalDevMode()).toBe(true)
 
     const { data, error } = await getFacturas('local-demo-company')
 
     expect(error).toBeNull()
     expect(Array.isArray(data)).toBe(true)
+    expect(data.length).toBeGreaterThan(0)
+    expect(data[0].folio).toBe('FAC-0001')
   })
 })
