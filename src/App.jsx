@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { isLocalDevMode, supabase } from './lib/supabase'
+import { supabase } from './lib/supabase'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -11,26 +11,16 @@ import Configuracion from './pages/Configuracion'
 import Tickets from './pages/Tickets'
 import Presupuestos from './pages/Presupuestos'
 import Stock from './pages/Stock'
-import Proveedores from './pages/Proveedores'
-import AlbaranesProveedor from './pages/AlbaranesProveedor'
-import FacturasProveedores from './pages/FacturasProveedores'
-import InformeIVA from './pages/InformeIVA'
 import Verificar from './pages/Verificar'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
-  const demoMode = isLocalDevMode()
 
   useEffect(() => {
-    if (demoMode) {
-      setSession({ user: { id: 'demo-user' } })
-      return
-    }
-
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
     return () => subscription.unsubscribe()
-  }, [demoMode])
+  }, [])
 
   // Ruta pública: accesible sin sesión, es a donde apunta el QR de las
   // facturas. Se comprueba ANTES de exigir login.
@@ -66,10 +56,6 @@ export default function App() {
         <Route path="/tickets"        element={<Tickets session={session} />} />
         <Route path="/presupuestos"   element={<Presupuestos session={session} />} />
         <Route path="/stock"          element={<Stock session={session} />} />
-        <Route path="/proveedores"    element={<Proveedores session={session} />} />
-        <Route path="/albaranes-proveedor" element={<AlbaranesProveedor session={session} />} />
-        <Route path="/facturas-proveedores" element={<FacturasProveedores session={session} />} />
-        <Route path="/informe-iva"    element={<InformeIVA session={session} />} />
         <Route path="/configuracion"  element={<Configuracion session={session} />} />
         <Route path="*"               element={<Navigate to="/dashboard" replace />} />
       </Routes>

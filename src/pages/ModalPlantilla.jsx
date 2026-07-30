@@ -13,7 +13,7 @@ export default function ModalPlantilla({ factura, empresa, onClose }) {
     setGenerating(true)
     try {
       const conceptos = factura.conceptos_factura || []
-      const qrText = await buildVerificationUrl({ empresa, factura })
+      const qrText = buildVerificationUrl({ empresa, factura })
       const doc = await generarPDF({
         factura,
         empresa,

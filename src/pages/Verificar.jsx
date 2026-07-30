@@ -4,7 +4,7 @@ import { verificarFactura, formatEuro, formatFecha } from '../lib/supabase'
 
 export default function Verificar() {
   const [params] = useSearchParams()
-  const [estado, setEstado] = useState('cargando') // cargando | valido | invalido | error | sin_datos
+  const [estado, setEstado] = useState('cargando') // cargando | valido | invalido | error
   const [resultado, setResultado] = useState(null)
 
   useEffect(() => {
@@ -14,12 +14,12 @@ export default function Verificar() {
     const fecha = params.get('fecha')
 
     if (!folio || !nif || !total || !fecha) {
-      setEstado('sin_datos')
+      setEstado('error')
       return
     }
 
     verificarFactura({ folio, nif, total: Number(total), fecha }).then(({ data, error }) => {
-      if (error) { console.error(error); setEstado('error'); return }
+      if (error) { setEstado('error'); return }
       if (!data)  { setEstado('invalido'); return }
       setResultado(data)
       setEstado('valido')
@@ -30,11 +30,10 @@ export default function Verificar() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#0f0e0c' }}>
       <div className="w-full max-w-sm card text-center">
         <div className="text-3xl mb-3">
-          {estado === 'cargando'  && '⏳'}
-          {estado === 'valido'    && '✅'}
-          {estado === 'invalido'  && '❌'}
-          {estado === 'error'     && '⚠️'}
-          {estado === 'sin_datos' && '⚠️'}
+          {estado === 'cargando' && '⏳'}
+          {estado === 'valido'   && '✅'}
+          {estado === 'invalido' && '❌'}
+          {estado === 'error'    && '⚠️'}
         </div>
 
         {estado === 'cargando' && <p className="text-gray-400 text-sm">Verificando factura…</p>}
@@ -48,12 +47,6 @@ export default function Verificar() {
               <div className="flex justify-between"><span className="text-gray-500">Fecha</span><span className="text-gray-100">{formatFecha(resultado.fecha_emision)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Total</span><span className="text-gray-100">{formatEuro(resultado.total)}</span></div>
               <div className="flex justify-between"><span className="text-gray-500">Estado</span><span className="text-gray-100 capitalize">{resultado.estado}</span></div>
-              {resultado.hash && (
-                <div className="flex justify-between items-center pt-2 mt-2 border-t border-gray-700/50">
-                  <span className="text-gray-500">🔒 Huella</span>
-                  <span className="text-gray-400 font-mono text-[10px]">{resultado.hash.slice(0, 16)}…</span>
-                </div>
-              )}
             </div>
           </>
         )}
@@ -66,13 +59,6 @@ export default function Verificar() {
         )}
 
         {estado === 'error' && (
-          <>
-            <h1 className="text-lg font-bold text-white mb-1">No se pudo comprobar</h1>
-            <p className="text-sm text-gray-500">Hubo un problema al consultar la factura. Si esto persiste, es posible que falte ejecutar la configuración de verificación en la base de datos.</p>
-          </>
-        )}
-
-        {estado === 'sin_datos' && (
           <>
             <h1 className="text-lg font-bold text-white mb-1">Enlace incompleto</h1>
             <p className="text-sm text-gray-500">Este enlace no contiene los datos necesarios para verificar la factura.</p>
