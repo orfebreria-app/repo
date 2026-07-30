@@ -45,7 +45,7 @@ export default async function handler(req, res) {
     if (errFact) throw errFact
 
     const factura = (facturas || []).find(item => {
-      const totalCoincide = Math.abs(Number(item.total || 0) - Number(total || 0)) < 0.01
+      const totalCoincide = !total || Math.abs(Number(item.total || 0) - Number(total || 0)) < 0.01
       const fechaCoincide = !fecha || String(item.fecha_emision).slice(0, 10) === String(fecha).slice(0, 10)
       const folioCoincide = !folio || String(item.folio || '').trim() === String(folio || '').trim()
       const idCoincide = !id || String(item.id || '').trim() === String(id || '').trim()

@@ -15,19 +15,20 @@
 --      del cliente ni de otras facturas.
 
 create or replace function verificar_factura(
-  p_folio  text,
-  p_nif    text,
-  p_total  numeric,
-  p_fecha  date
+  p_folio text default null,
+  p_nif text default null,
+  p_total numeric default null,
+  p_fecha date default null,
+  p_id uuid default null,
+  p_empresa_id uuid default null
 )
 returns table (
-  valido         boolean,
-  folio          text,
-  fecha_emision  date,
-  total          numeric,
-  estado         estado_factura,
-  empresa_nombre text,
-  hash           text
+  valido boolean,
+  folio text,
+  fecha_emision date,
+  total numeric,
+  estado text,
+  empresa_nombre text
 )
 language plpgsql
 security definer
@@ -38,22 +39,22 @@ begin
   select
     true,
     f.folio::text,
-    f.fecha_emision,
+    f.fecha_emision::date,
     f.total,
-    f.estado,
-    e.nombre::text,
-    f.hash
+    f.estado::text,
+    e.nombre::text
   from facturas f
   join empresas e on e.id = f.empresa_id
-  where f.folio = p_folio
-    and e.nif_cif = p_nif
-    and f.fecha_emision = p_fecha
-    and abs(f.total - p_total) < 0.01
+  where
+    (p_folio is null or trim(coalesce(p_folio, '')) = '' or lower(trim(f.folio::text)) = lower(trim(p_folio)))
+    and (p_id is null or f.id = p_id)
+    and (p_empresa_id is null or f.empresa_id = p_empresa_id)
+    and (p_nif is null or trim(coalesce(p_nif, '')) = '' or lower(trim(coalesce(e.nif_cif, ''))) = lower(trim(p_nif)))
+    and (p_total is null or p_total = 0 or abs(f.total - p_total) < 0.01)
+    and (p_fecha is null or f.fecha_emision::date = p_fecha)
+  order by f.created_at desc nulls last
   limit 1;
 end;
 $$;
 
--- Permite que cualquiera (incluso sin sesión) pueda llamar a esta
--- función concreta — no afecta al resto de tablas, que siguen
--- protegidas por RLS.
-grant execute on function verificar_factura(text, text, numeric, date) to anon, authenticated;
+grant execute on function verificar_factura(text, text, numeric, date, uuid, uuid) to anon, authenticated;

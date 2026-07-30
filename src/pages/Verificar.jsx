@@ -4,23 +4,25 @@ import { verificarFactura, formatEuro, formatFecha } from '../lib/supabase'
 
 export default function Verificar() {
   const [params] = useSearchParams()
-  const [estado, setEstado] = useState('cargando') // cargando | valido | invalido | error
+  const [estado, setEstado] = useState('cargando') // cargando | valido | invalido | error | sin_datos
   const [resultado, setResultado] = useState(null)
 
   useEffect(() => {
     const folio = params.get('folio')
-    const nif   = params.get('nif')
+    const nif = params.get('nif')
     const total = params.get('total')
     const fecha = params.get('fecha')
+    const id = params.get('id')
+    const empresaId = params.get('empresa_id')
 
-    if (!folio || !nif || !total || !fecha) {
-      setEstado('error')
+    if (!folio && !id) {
+      setEstado('sin_datos')
       return
     }
 
-    verificarFactura({ folio, nif, total: Number(total), fecha }).then(({ data, error }) => {
-      if (error) { setEstado('error'); return }
-      if (!data)  { setEstado('invalido'); return }
+    verificarFactura({ folio, nif, total: Number(total || 0), fecha, id, empresa_id: empresaId }).then(({ data, error }) => {
+      if (error) { console.error(error); setEstado('error'); return }
+      if (!data) { setEstado('invalido'); return }
       setResultado(data)
       setEstado('valido')
     })
@@ -30,10 +32,11 @@ export default function Verificar() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#0f0e0c' }}>
       <div className="w-full max-w-sm card text-center">
         <div className="text-3xl mb-3">
-          {estado === 'cargando' && '⏳'}
-          {estado === 'valido'   && '✅'}
-          {estado === 'invalido' && '❌'}
-          {estado === 'error'    && '⚠️'}
+          {estado === 'cargando'  && '⏳'}
+          {estado === 'valido'    && '✅'}
+          {estado === 'invalido'  && '❌'}
+          {estado === 'error'     && '⚠️'}
+          {estado === 'sin_datos' && '⚠️'}
         </div>
 
         {estado === 'cargando' && <p className="text-gray-400 text-sm">Verificando factura…</p>}
@@ -59,6 +62,13 @@ export default function Verificar() {
         )}
 
         {estado === 'error' && (
+          <>
+            <h1 className="text-lg font-bold text-white mb-1">No se pudo comprobar</h1>
+            <p className="text-sm text-gray-500">Hubo un problema al consultar la factura. Inténtalo de nuevo o contacta con quien te emitió el documento.</p>
+          </>
+        )}
+
+        {estado === 'sin_datos' && (
           <>
             <h1 className="text-lg font-bold text-white mb-1">Enlace incompleto</h1>
             <p className="text-sm text-gray-500">Este enlace no contiene los datos necesarios para verificar la factura.</p>
