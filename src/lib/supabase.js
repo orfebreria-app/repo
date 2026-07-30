@@ -221,6 +221,8 @@ export const createSupabaseClient = (url = supabaseUrl, key = supabaseKey) => {
     return {
       auth: {
         getSession: async () => ({ data: { session: null }, error: null }),
+        getUser: async () => ({ data: { user: null }, error: null }),
+        onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
         signInWithPassword: async () => ({ data: { session: null }, error: null }),
         signUp: async () => ({ data: { session: null }, error: null }),
         signOut: async () => ({ error: null }),
@@ -251,12 +253,23 @@ export const createSupabaseClient = (url = supabaseUrl, key = supabaseKey) => {
   return createClient(url, key)
 }
 
-export const getSupabaseClient = () => createSupabaseClient(supabaseUrl, supabaseKey)
+let cachedSupabaseClient = null
+let cachedSupabaseClientKey = null
+
+export const getSupabaseClient = () => {
+  const modeKey = isLocalDevMode() ? 'demo' : `${supabaseUrl || ''}|${supabaseKey || ''}`
+
+  if (!cachedSupabaseClient || cachedSupabaseClientKey !== modeKey) {
+    cachedSupabaseClient = createSupabaseClient(supabaseUrl, supabaseKey)
+    cachedSupabaseClientKey = modeKey
+  }
+
+  return cachedSupabaseClient
+}
 
 export const supabase = new Proxy({}, {
   get(_target, prop) {
-    const client = getSupabaseClient()
-    return client[prop]
+    return getSupabaseClient()[prop]
   },
 })
 
