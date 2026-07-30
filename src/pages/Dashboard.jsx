@@ -23,24 +23,84 @@ export default function Dashboard({ session }) {
   const [facturas, setFacturas] = useState([])
   const [tickets,  setTickets]  = useState([])
   const [loading,  setLoading]  = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
+    let active = true
+
     const load = async () => {
-      const { data: emp } = await getEmpresa(session.user.id)
-      setEmpresa(emp)
-      if (emp) {
-        const { data: facts } = await getFacturas(emp.id)
-        setFacturas(facts || [])
-        const { data: ticks } = await supabase
-          .from('tickets')
-          .select('*, lineas_ticket(*)')
-          .eq('empresa_id', emp.id)
-          .order('creado_en', { ascending: false })
-        setTickets(ticks || [])
+      setLoading(true)
+      setLoadError('')
+
+      try {
+        const { data: emp, error: empresaError } = await getEmpresa(session.user.id)
+        if (!active) return
+
+        if (empresaError) {
+          throw empresaError
+        }
+
+        setEmpresa(emp)
+
+        if (!emp) {
+          setFacturas([])
+          setTickets([])
+          return
+        }
+
+        const [facturasResult, ticketsResult] = await Promise.allSettled([
+          getFacturas(emp.id),
+          supabase
+            .from('tickets')
+            .select('*, lineas_ticket(*)')
+            .eq('empresa_id', emp.id)
+            .order('creado_en', { ascending: false }),
+        ])
+
+        if (!active) return
+
+        if (facturasResult.status === 'fulfilled') {
+          setFacturas(facturasResult.value.data || [])
+          if (facturasResult.value.error) {
+            console.error('Error cargando facturas', facturasResult.value.error)
+            setLoadError('No se pudieron cargar todas las facturas.')
+          }
+        } else {
+          console.error('Error cargando facturas', facturasResult.reason)
+          setFacturas([])
+          setLoadError('No se pudieron cargar todas las facturas.')
+        }
+
+        if (ticketsResult.status === 'fulfilled') {
+          setTickets(ticketsResult.value.data || [])
+          if (ticketsResult.value.error) {
+            console.error('Error cargando tickets', ticketsResult.value.error)
+            setLoadError(prev => prev || 'No se pudieron cargar todos los tickets.')
+          }
+        } else {
+          console.error('Error cargando tickets', ticketsResult.reason)
+          setTickets([])
+          setLoadError(prev => prev || 'No se pudieron cargar todos los tickets.')
+        }
+      } catch (error) {
+        if (!active) return
+        console.error('Error cargando dashboard', error)
+        setEmpresa(null)
+        setFacturas([])
+        setTickets([])
+        setLoadError('Hubo un problema cargando el dashboard.')
+      } finally {
+        if (active) {
+          setLoading(false)
+        }
       }
-      setLoading(false)
     }
+
     load()
+
+    return () => {
+      active = false
+    }
   }, [session])
 
   if (loading) return <LoadingSkeleton />
@@ -124,6 +184,12 @@ export default function Dashboard({ session }) {
           <div><strong>Configura tu empresa antes de empezar.</strong>{' '}
             <Link to="/configuracion" className="underline hover:text-yellow-300">Ir a Configuración →</Link>
           </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="bg-orange-900/20 border border-orange-700/40 rounded-xl p-4 text-sm text-orange-300">
+          {loadError}
         </div>
       )}
 
