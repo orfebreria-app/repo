@@ -765,6 +765,103 @@ export const verificarFactura = async ({ folio, nif, total, fecha, id, empresa_i
   }
 }
 
+// ── Albaranes de proveedor ─────────────────────────────
+export const getAlbaranesProveedor = async (empresaId) => {
+  const client = getSupabaseClient()
+  return client
+    .from('albaranes_proveedor')
+    .select('*, proveedores(nombre), lineas_albaran_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .order('creado_en', { ascending: false })
+}
+
+export const createAlbaranProveedor = async (albaran, lineas) => {
+  const client = getSupabaseClient()
+  const { data, error } = await client
+    .from('albaranes_proveedor')
+    .insert(albaran)
+    .select()
+    .single()
+  if (error) return { error }
+
+  // Suma stock por cada línea que tenga producto_id
+  for (const l of lineas) {
+    if (l.producto_id) {
+      await entradaStock(albaran.empresa_id, l.producto_id, Number(l.cantidad), `Albarán proveedor`)
+    }
+  }
+
+  const lineasConId = lineas.map((l, i) => ({ ...l, albaran_id: data.id, orden: i }))
+  const { error: errLineas } = await client.from('lineas_albaran_proveedor').insert(lineasConId)
+  if (errLineas) return { error: errLineas }
+  return { data, error: null }
+}
+
+export const deleteAlbaranProveedor = async (id) => {
+  const client = getSupabaseClient()
+  return client.from('albaranes_proveedor').delete().eq('id', id)
+}
+
+export const getAlbaranesPendientes = async (empresaId, proveedorId) => {
+  const client = getSupabaseClient()
+  return client
+    .from('albaranes_proveedor')
+    .select('*, lineas_albaran_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .eq('proveedor_id', proveedorId)
+    .eq('estado', 'pendiente')
+    .order('fecha_albaran', { ascending: true })
+}
+
+export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) => {
+  const client = getSupabaseClient()
+
+  // 1. Crear la factura de proveedor
+  const { data: factData, error: errFact } = await client
+    .from('facturas_proveedor')
+    .insert(factura)
+    .select()
+    .single()
+  if (errFact) return { error: errFact }
+
+  // 2. Insertar líneas
+  const lineasConId = lineas.map((l, i) => ({ ...l, factura_id: factData.id, orden: i }))
+  const { error: errLineas } = await client.from('lineas_factura_proveedor').insert(lineasConId)
+  if (errLineas) return { error: errLineas }
+
+  // 3. Marcar los albaranes como facturados y enlazarlos
+  const { error: errAlb } = await client
+    .from('albaranes_proveedor')
+    .update({ estado: 'facturado', factura_id: factData.id })
+    .in('id', albaranIds)
+  if (errAlb) return { error: errAlb }
+
+  return { data: factData, error: null }
+}
+
+// ── Informe de IVA ─────────────────────────────────────
+export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
+  const client = getSupabaseClient()
+  return client
+    .from('facturas')
+    .select('*, conceptos_factura(*)')
+    .eq('empresa_id', empresaId)
+    .neq('estado', 'borrador')
+    .gte('fecha', desde)
+    .lte('fecha', hasta)
+}
+
+export const getComprasParaInforme = async (empresaId, desde, hasta) => {
+  const client = getSupabaseClient()
+  return client
+    .from('facturas_proveedor')
+    .select('*, lineas_factura_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .neq('estado', 'cancelada')
+    .gte('fecha_factura', desde)
+    .lte('fecha_factura', hasta)
+}
+
 // ── Envío de email ─────────────────────────────────────
 export const enviarEmail = async ({ to, subject, html, fromName }) => {
   try {
