@@ -8,6 +8,7 @@ const empty = {
   moneda: 'EUR', serie: 'FAC', iva_default: 21,
   serie_presupuesto: 'PRE',
   recargo_equivalencia: false,
+  coeficiente_venta: 2.5,
   factura_config: {
     plantilla: 'moderna',
     colorId: 'azul',
@@ -231,6 +232,32 @@ export default function Configuracion({ session }) {
               Régimen especial para minoristas. Se aplica sobre la base imponible además del IVA (21%→5,2% · 10%→1,4% · 4%→0,5%).
             </p>
           </div>
+          <div className="md:col-span-3 border-t border-gray-700 pt-4">
+            <label className="label">Coeficiente de precio de venta</label>
+            <div className="flex items-center gap-4 mt-1">
+              <input
+                className="input w-32"
+                type="number"
+                step="0.01"
+                min="1"
+                max="100"
+                value={form.coeficiente_venta ?? 2.5}
+                onChange={e => setForm({ ...form, coeficiente_venta: parseFloat(e.target.value) || 2.5 })}
+              />
+              <span className="text-sm text-gray-400">
+                Precio venta = Precio compra × <strong className="text-white">{form.coeficiente_venta ?? 2.5}</strong>
+                {form.coeficiente_venta && (
+                  <span className="ml-2 text-xs text-gray-600">
+                    (Ej: 10,00€ compra → {(10 * (form.coeficiente_venta ?? 2.5)).toFixed(2)}€ venta)
+                  </span>
+                )}
+              </span>
+            </div>
+            <p className="text-xs text-gray-600 mt-2">
+              Se aplica automáticamente al precio de venta cuando introduces el precio de compra en una factura de proveedor. Puedes modificarlo artículo a artículo desde Stock.
+            </p>
+          </div>
+
           <div className="md:col-span-3 border-t border-gray-700 pt-4">
             <label className="label">Factura electrónica</label>
             <div className="flex items-center gap-4">

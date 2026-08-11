@@ -4,9 +4,14 @@ import {
   getFacturasProveedor, createFacturaProveedor,
   getAlbaranesPendientes, crearFacturaDesdeAlbaranes,
   updateEstadoFacturaProveedor, deleteFacturaProveedor,
+  actualizarPreciosProducto,
   formatEuro, formatFecha,
 } from '../lib/supabase'
 import { format } from 'date-fns'
+
+// Tasas de Recargo de Equivalencia
+const RE_TASAS = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
+const tasaRE = (ivaTasa) => RE_TASAS[Number(ivaTasa)] ?? 0
 
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
@@ -47,6 +52,7 @@ export default function FacturasProveedores({ session }) {
   const [albaranesPendientes, setAlbaranesPendientes] = useState([])
   const [seleccionados, setSeleccionados]             = useState([])
   const [cargandoAlbaranes, setCargandoAlbaranes]     = useState(false)
+  const [conRE, setConRE]                             = useState(false)
 
   const cargar = async (emp) => {
     const [{ data: facts }, { data: provs }, { data: prods }] = await Promise.all([
@@ -69,7 +75,7 @@ export default function FacturasProveedores({ session }) {
     init()
   }, [session])
 
-  const openNew = () => { setForm(emptyForm()); setError(''); setModo('albaranes'); setSeleccionados([]); setAlbaranesPendientes([]); setModal(true) }
+  const openNew = () => { setForm(emptyForm()); setError(''); setModo('albaranes'); setSeleccionados([]); setAlbaranesPendientes([]); setConRE(empresa?.recargo_equivalencia ?? false); setModal(true) }
   const closeModal = () => setModal(false)
 
   const cambiarProveedor = async (proveedorId) => {
@@ -129,15 +135,18 @@ export default function FacturasProveedores({ session }) {
 
   // Totales: siempre a partir de form.lineas (editable en ambos modos)
   const albaranesElegidos = albaranesPendientes.filter(a => seleccionados.includes(a.id))
-  const subtotal  = form.lineas.reduce((s, l) => s + calcLinea(l), 0)
-  const ivaTotal  = form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
-  const total     = subtotal + ivaTotal
+  const subtotal   = form.lineas.reduce((s, l) => s + calcLinea(l), 0)
+  const ivaTotal   = form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
+  const reTotal    = conRE ? form.lineas.reduce((s, l) => s + +(calcLinea(l) * tasaRE(l.iva_tasa) / 100).toFixed(2), 0) : 0
+  const total      = subtotal + ivaTotal + reTotal
 
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.proveedor_id) return setError('Elige un proveedor')
 
     setSaving(true)
+
+    const coeficiente = Number(empresa?.coeficiente_venta) || 2.5
 
     const factura = {
       empresa_id: empresa.id,
@@ -148,7 +157,19 @@ export default function FacturasProveedores({ session }) {
       notas: form.notas || null,
       subtotal: +subtotal.toFixed(2),
       iva_total: +ivaTotal.toFixed(2),
+      recargo_total: +reTotal.toFixed(2),
       total: +total.toFixed(2),
+    }
+
+    // Función auxiliar: actualizar precio_compra y precio_venta de los productos
+    const actualizarPrecios = async (lineas) => {
+      for (const l of lineas) {
+        if (l.producto_id && Number(l.precio_unitario) > 0) {
+          const precioCompra = Number(l.precio_unitario)
+          const precioVenta  = +(precioCompra * coeficiente).toFixed(2)
+          await actualizarPreciosProducto(l.producto_id, precioCompra, precioVenta)
+        }
+      }
     }
 
     if (modo === 'albaranes') {
@@ -163,6 +184,7 @@ export default function FacturasProveedores({ session }) {
       }))
       const { error: err } = await crearFacturaDesdeAlbaranes(factura, lineas, albaranesElegidos.map(a => a.id))
       if (err) { setError(err.message); setSaving(false); return }
+      await actualizarPrecios(lineas)
     } else {
       const lineasValidas = form.lineas.filter(l => l.descripcion.trim() && Number(l.precio_unitario) > 0)
       if (!lineasValidas.length) { setError('Añade al menos una línea con descripción y precio'); setSaving(false); return }
@@ -207,6 +229,7 @@ export default function FacturasProveedores({ session }) {
 
       const { error: err } = await createFacturaProveedor(factura, lineas)
       if (err) { setError(err.message); setSaving(false); return }
+      await actualizarPrecios(lineas)
     }
 
     await cargar(empresa)
@@ -424,10 +447,38 @@ export default function FacturasProveedores({ session }) {
               <textarea className="input h-16 resize-none text-sm" value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} />
             </div>
 
-            <div className="flex justify-end gap-6 text-sm border-t border-gray-800 pt-3">
-              <div>Subtotal <span className="font-mono text-gray-300 ml-2">{formatEuro(subtotal)}</span></div>
-              <div>IVA <span className="font-mono text-gray-300 ml-2">{formatEuro(ivaTotal)}</span></div>
-              <div className="font-bold">Total <span className="font-mono text-white ml-2">{formatEuro(total)}</span></div>
+            <div className="border-t border-gray-800 pt-3 space-y-2">
+              {/* Toggle Recargo de Equivalencia */}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-400 select-none">
+                  <div className="relative" onClick={() => setConRE(v => !v)}>
+                    <div className={`w-10 h-5 rounded-full transition-all ${conRE ? '' : 'bg-gray-700'}`}
+                      style={conRE ? { background: 'linear-gradient(135deg,#C9A84C,#a8882e)' } : {}}>
+                      <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${conRE ? 'translate-x-5' : ''}`} />
+                    </div>
+                  </div>
+                  <span>Recargo de equivalencia en esta factura</span>
+                </label>
+              </div>
+              {/* Totales */}
+              <div className="flex flex-wrap justify-end gap-x-6 gap-y-1 text-sm">
+                <div>Subtotal <span className="font-mono text-gray-300 ml-2">{formatEuro(subtotal)}</span></div>
+                <div>IVA <span className="font-mono text-gray-300 ml-2">{formatEuro(ivaTotal)}</span></div>
+                {conRE && (
+                  <div>Recargo equiv. <span className="font-mono text-yellow-400 ml-2">{formatEuro(reTotal)}</span></div>
+                )}
+                <div className="font-bold">Total <span className="font-mono text-white ml-2">{formatEuro(total)}</span></div>
+              </div>
+              {conRE && (
+                <div className="flex flex-wrap gap-2 text-xs justify-end">
+                  {[{iva:21,re:5.2},{iva:10,re:1.4},{iva:4,re:0.5}].map(({iva,re}) => (
+                    <span key={iva} className="px-2 py-1 rounded-lg border"
+                      style={{ background:'rgba(201,168,76,0.08)', borderColor:'rgba(201,168,76,0.25)', color:'#C9A84C' }}>
+                      IVA {iva}% + RE {re}%
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {error && <p className="text-red-400 text-sm">{error}</p>}

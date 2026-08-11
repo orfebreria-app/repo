@@ -488,6 +488,14 @@ export const upsertProducto = async (prod) => {
   return { data, error }
 }
 
+export const actualizarPreciosProducto = async (productoId, precioCompra, precioVenta) => {
+  const client = getSupabaseClient()
+  return client
+    .from('productos')
+    .update({ precio_compra: +precioCompra.toFixed(2), precio_venta: +precioVenta.toFixed(2) })
+    .eq('id', productoId)
+}
+
 export const deleteProducto = async (id) => {
   const { error } = await supabase.from('productos').update({ activo: false }).eq('id', id)
   return { error }

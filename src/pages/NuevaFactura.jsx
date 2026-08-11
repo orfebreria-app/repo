@@ -160,6 +160,9 @@ export default function NuevaFactura({ session }) {
       const { data: fact, error: err } = await createFactura(facturaData, conceptos)
       if (err) throw new Error(err.message)
 
+      // Descontar stock automáticamente al emitir factura
+      await descontarStockVenta(empresa.id, conceptos, fact.id, 'factura')
+
       navigate('/facturas')
     } catch (err) {
       setError(err.message || 'Error desconocido')
