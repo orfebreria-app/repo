@@ -4,6 +4,7 @@ import {
   getAlbaranesProveedor, createAlbaranProveedor, deleteAlbaranProveedor,
   formatEuro, formatFecha,
 } from '../lib/supabase'
+import { tasaRE } from '../lib/calculos'
 import { format } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -12,11 +13,12 @@ const lineaVacia = () => ({
   cantidad: 1,
   precio_unitario: '',
   iva_tasa: 21,
+  recargo_tasa: '',
   producto_id: null,
   referencia: '',
 })
 
-const calcLinea = (l) => +(Number(l.cantidad) * Number(l.precio_unitario || 0)).toFixed(2)
+const calcBase = (l) => +(Number(l.cantidad || 0) * Number(l.precio_unitario || 0)).toFixed(2)
 
 const emptyForm = () => ({
   proveedor_id: '',
@@ -59,6 +61,9 @@ export default function AlbaranesProveedor({ session }) {
     init()
   }, [session])
 
+  const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
+  const proveedorConRE = !!proveedorSeleccionado?.recargo_equivalencia
+
   const openNew = () => { setForm(emptyForm()); setError(''); setModal(true) }
   const closeModal = () => setModal(false)
 
@@ -68,15 +73,23 @@ export default function AlbaranesProveedor({ session }) {
   const addLinea = () => setForm(f => ({ ...f, lineas: [...f.lineas, lineaVacia()] }))
   const removeLinea = (id) => setForm(f => ({ ...f, lineas: f.lineas.filter(l => l._id !== id) }))
 
-  const subtotal = form.lineas.reduce((s, l) => s + calcLinea(l), 0)
-  const ivaTotal  = form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
-  const total     = subtotal + ivaTotal
+  const recargoLinea = (l) => {
+    const tasa = l.recargo_tasa === '' ? tasaRE(l.iva_tasa) : Number(l.recargo_tasa)
+    return +(calcBase(l) * tasa / 100).toFixed(2)
+  }
+
+  const subtotal     = form.lineas.reduce((s, l) => s + calcBase(l), 0)
+  const ivaTotal      = form.lineas.reduce((s, l) => s + +(calcBase(l) * (Number(l.iva_tasa || 0) / 100)).toFixed(2), 0)
+  const recargoTotal  = proveedorConRE ? form.lineas.reduce((s, l) => s + recargoLinea(l), 0) : 0
+  const total         = subtotal + ivaTotal + recargoTotal
 
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.proveedor_id) return setError('Elige un proveedor')
-    const lineasValidas = form.lineas.filter(l => l.descripcion.trim() && Number(l.precio_unitario) > 0)
-    if (!lineasValidas.length) return setError('Añade al menos una línea con descripción y precio')
+    // Solo hace falta descripción — precio e IVA pueden rellenarse
+    // más tarde, al llegar la factura (muchos albaranes no traen precio).
+    const lineasValidas = form.lineas.filter(l => l.descripcion.trim())
+    if (!lineasValidas.length) return setError('Añade al menos una línea con descripción')
 
     setSaving(true)
 
@@ -95,7 +108,7 @@ export default function AlbaranesProveedor({ session }) {
             nombre: l.descripcion || ref,
             referencia: ref,
             precio_compra: Number(l.precio_unitario) || 0,
-            iva_tasa: Number(l.iva_tasa),
+            iva_tasa: Number(l.iva_tasa) || 21,
             stock_actual: 0,
           })
           if (errProd) { setError('Error al crear el producto "' + ref + '": ' + errProd.message); setSaving(false); return }
@@ -113,15 +126,18 @@ export default function AlbaranesProveedor({ session }) {
       notas: form.notas || null,
       subtotal: +subtotal.toFixed(2),
       iva_total: +ivaTotal.toFixed(2),
+      recargo_total: +recargoTotal.toFixed(2),
       total: +total.toFixed(2),
     }
     const lineas = lineasConProducto.map(l => ({
       descripcion: l.descripcion,
       referencia: l.referencia || null,
-      cantidad: Number(l.cantidad),
-      precio_unitario: Number(l.precio_unitario),
-      iva_tasa: Number(l.iva_tasa),
-      subtotal: calcLinea(l),
+      cantidad: Number(l.cantidad) || 0,
+      precio_unitario: Number(l.precio_unitario) || 0,
+      iva_tasa: Number(l.iva_tasa) || 0,
+      recargo_tasa: proveedorConRE ? (l.recargo_tasa === '' ? tasaRE(l.iva_tasa) : Number(l.recargo_tasa)) : 0,
+      recargo_importe: proveedorConRE ? recargoLinea(l) : 0,
+      subtotal: calcBase(l),
       producto_id: l.producto_id || null,
     }))
 
@@ -187,7 +203,7 @@ export default function AlbaranesProveedor({ session }) {
                       {a.estado}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{formatEuro(a.total)}</td>
+                  <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{a.total ? formatEuro(a.total) : '—'}</td>
                   <td className="py-3 px-4 text-right">
                     {a.estado === 'pendiente' && (
                       <button onClick={() => handleDelete(a.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
@@ -221,6 +237,12 @@ export default function AlbaranesProveedor({ session }) {
               </div>
             </div>
 
+            {proveedorConRE && (
+              <p className="text-xs text-brand-500 bg-brand-500/10 border border-brand-500/30 rounded-lg px-3 py-2">
+                Este proveedor aplica recargo de equivalencia — indica el que te pongan en cada línea (o deja el valor por defecto).
+              </p>
+            )}
+
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="label mb-0">Líneas</label>
@@ -248,13 +270,22 @@ export default function AlbaranesProveedor({ session }) {
                         }
                       }}
                     />
-                    <input className="input col-span-4 text-xs" placeholder="Descripción" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
-                    <input className="input col-span-1 text-xs" type="number" step="0.001" min="0" value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
-                    <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
+                    <input className="input col-span-3 text-xs" placeholder="Descripción *" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
+                    <input className="input col-span-1 text-xs" type="number" step="0.001" min="0" placeholder="Cant." value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
+                    <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio (opc.)" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
                     <select className="input col-span-1 text-xs" value={l.iva_tasa} onChange={e => setLinea(l._id, 'iva_tasa', e.target.value)}>
+                      <option value="">IVA</option>
                       <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
                     </select>
-                    <span className="col-span-1 text-xs text-center pt-2" title={l.referencia ? (l.producto_id ? 'Producto existente' : 'Se creará como producto nuevo') : 'Sin código: no afecta al stock'}>
+                    {proveedorConRE && (
+                      <input
+                        className="input col-span-1 text-xs" type="number" step="0.01" min="0"
+                        placeholder={`RE ${tasaRE(l.iva_tasa)}%`}
+                        value={l.recargo_tasa}
+                        onChange={e => setLinea(l._id, 'recargo_tasa', e.target.value)}
+                      />
+                    )}
+                    <span className={`text-xs text-center pt-2 ${proveedorConRE ? 'col-span-1' : 'col-span-2'}`} title={l.referencia ? (l.producto_id ? 'Producto existente' : 'Se creará como producto nuevo') : 'Sin código: no afecta al stock'}>
                       {l.referencia ? (l.producto_id ? '✅' : '🆕') : '—'}
                     </span>
                     <button type="button" onClick={() => removeLinea(l._id)} className="col-span-1 text-gray-600 hover:text-red-400 text-xs">✕</button>
@@ -265,7 +296,8 @@ export default function AlbaranesProveedor({ session }) {
                 {productos.filter(p => p.referencia).map(p => <option key={p.id} value={p.referencia} />)}
               </datalist>
               <p className="text-xs text-gray-600 mt-2">
-                El stock se suma al guardar el albarán (la mercancía ya ha llegado). La factura, cuando llegue, se genera después seleccionando este albarán — sin volver a tocar el stock.
+                Solo la descripción es obligatoria — puedes dejar precio e IVA en blanco si el albarán no los trae, y rellenarlos luego al facturar.
+                El stock se suma al guardar (la mercancía ya ha llegado). La factura se genera después seleccionando este albarán.
               </p>
             </div>
 
@@ -277,6 +309,7 @@ export default function AlbaranesProveedor({ session }) {
             <div className="flex justify-end gap-6 text-sm border-t border-gray-800 pt-3">
               <div>Subtotal <span className="font-mono text-gray-300 ml-2">{formatEuro(subtotal)}</span></div>
               <div>IVA <span className="font-mono text-gray-300 ml-2">{formatEuro(ivaTotal)}</span></div>
+              {proveedorConRE && <div>Recargo <span className="font-mono text-gray-300 ml-2">{formatEuro(recargoTotal)}</span></div>}
               <div className="font-bold">Total <span className="font-mono text-white ml-2">{formatEuro(total)}</span></div>
             </div>
 
@@ -306,7 +339,7 @@ function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-3xl">
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-4xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>

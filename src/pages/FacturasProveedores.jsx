@@ -6,6 +6,7 @@ import {
   updateEstadoFacturaProveedor, deleteFacturaProveedor,
   formatEuro, formatFecha,
 } from '../lib/supabase'
+import { tasaRE } from '../lib/calculos'
 import { format } from 'date-fns'
 
 const lineaVacia = () => ({
@@ -14,11 +15,12 @@ const lineaVacia = () => ({
   cantidad: 1,
   precio_unitario: '',
   iva_tasa: 21,
+  recargo_tasa: '',
   producto_id: null,
   referencia: '',
 })
 
-const calcLinea = (l) => +(Number(l.cantidad) * Number(l.precio_unitario || 0)).toFixed(2)
+const calcBase = (l) => +(Number(l.cantidad || 0) * Number(l.precio_unitario || 0)).toFixed(2)
 
 const emptyForm = () => ({
   proveedor_id: '',
@@ -69,6 +71,9 @@ export default function FacturasProveedores({ session }) {
     init()
   }, [session])
 
+  const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
+  const proveedorConRE = !!proveedorSeleccionado?.recargo_equivalencia
+
   const openNew = () => { setForm(emptyForm()); setError(''); setModo('albaranes'); setSeleccionados([]); setAlbaranesPendientes([]); setModal(true) }
   const closeModal = () => setModal(false)
 
@@ -93,6 +98,8 @@ export default function FacturasProveedores({ session }) {
       const { data } = await getAlbaranesPendientes(empresa.id, form.proveedor_id)
       setAlbaranesPendientes(data)
       setCargandoAlbaranes(false)
+    } else {
+      setForm(f => ({ ...f, lineas: [lineaVacia()] }))
     }
   }
 
@@ -102,8 +109,8 @@ export default function FacturasProveedores({ session }) {
 
   // Cada vez que cambia la selección de albaranes, se regeneran las
   // líneas editables de la factura a partir de sus líneas — el
-  // usuario puede tocar el precio si el proveedor cobra distinto
-  // en la factura respecto a lo que ponía el albarán.
+  // usuario puede tocar precio, IVA o recargo, añadir líneas nuevas
+  // o quitar alguna, igual que en el modo manual.
   useEffect(() => {
     if (modo !== 'albaranes') return
     const lineasDeAlbaranes = albaranesPendientes
@@ -114,6 +121,7 @@ export default function FacturasProveedores({ session }) {
         cantidad: l.cantidad,
         precio_unitario: l.precio_unitario,
         iva_tasa: l.iva_tasa,
+        recargo_tasa: l.recargo_tasa || '',
         producto_id: l.producto_id,
         referencia: l.referencia || '',
       })))
@@ -127,15 +135,51 @@ export default function FacturasProveedores({ session }) {
   const addLinea = () => setForm(f => ({ ...f, lineas: [...f.lineas, lineaVacia()] }))
   const removeLinea = (id) => setForm(f => ({ ...f, lineas: f.lineas.filter(l => l._id !== id) }))
 
-  // Totales: siempre a partir de form.lineas (editable en ambos modos)
-  const albaranesElegidos = albaranesPendientes.filter(a => seleccionados.includes(a.id))
-  const subtotal  = form.lineas.reduce((s, l) => s + calcLinea(l), 0)
-  const ivaTotal  = form.lineas.reduce((s, l) => s + calcLinea(l) * (Number(l.iva_tasa) / 100), 0)
-  const total     = subtotal + ivaTotal
+  const recargoLinea = (l) => {
+    const tasa = l.recargo_tasa === '' || l.recargo_tasa === undefined ? tasaRE(l.iva_tasa) : Number(l.recargo_tasa)
+    return +(calcBase(l) * tasa / 100).toFixed(2)
+  }
+
+  const subtotal    = form.lineas.reduce((s, l) => s + calcBase(l), 0)
+  const ivaTotal     = form.lineas.reduce((s, l) => s + +(calcBase(l) * (Number(l.iva_tasa || 0) / 100)).toFixed(2), 0)
+  const recargoTotal = proveedorConRE ? form.lineas.reduce((s, l) => s + recargoLinea(l), 0) : 0
+  const total        = subtotal + ivaTotal + recargoTotal
+
+  const resolverLineasConProducto = async (lineasValidas) => {
+    const lineasConProducto = []
+    for (const l of lineasValidas) {
+      let productoId = l.producto_id
+      const ref = (l.referencia || '').trim()
+      if (!productoId && ref) {
+        const existente = productos.find(p => (p.referencia || '').toLowerCase() === ref.toLowerCase())
+        if (existente) {
+          productoId = existente.id
+        } else {
+          const { data: nuevoProd, error: errProd } = await upsertProducto({
+            empresa_id: empresa.id,
+            proveedor_id: form.proveedor_id,
+            nombre: l.descripcion || ref,
+            referencia: ref,
+            precio_compra: Number(l.precio_unitario) || 0,
+            iva_tasa: Number(l.iva_tasa) || 21,
+            stock_actual: 0,
+          })
+          if (errProd) throw new Error('Error al crear el producto "' + ref + '": ' + errProd.message)
+          productoId = nuevoProd.id
+        }
+      }
+      lineasConProducto.push({ ...l, producto_id: productoId })
+    }
+    return lineasConProducto
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.proveedor_id) return setError('Elige un proveedor')
+
+    const lineasValidas = form.lineas.filter(l => l.descripcion.trim())
+    if (!lineasValidas.length) return setError('Añade al menos una línea con descripción')
+    if (modo === 'albaranes' && !seleccionados.length) return setError('Selecciona al menos un albarán')
 
     setSaving(true)
 
@@ -148,65 +192,34 @@ export default function FacturasProveedores({ session }) {
       notas: form.notas || null,
       subtotal: +subtotal.toFixed(2),
       iva_total: +ivaTotal.toFixed(2),
+      recargo_total: +recargoTotal.toFixed(2),
       total: +total.toFixed(2),
     }
 
-    if (modo === 'albaranes') {
-      if (!albaranesElegidos.length) { setError('Selecciona al menos un albarán'); setSaving(false); return }
-      const lineas = form.lineas.map(l => ({
-        descripcion: l.descripcion,
-        cantidad: Number(l.cantidad),
-        precio_unitario: Number(l.precio_unitario),
-        iva_tasa: Number(l.iva_tasa),
-        subtotal: calcLinea(l),
-        producto_id: l.producto_id || null,
-      }))
-      const { error: err } = await crearFacturaDesdeAlbaranes(factura, lineas, albaranesElegidos.map(a => a.id))
-      if (err) { setError(err.message); setSaving(false); return }
-    } else {
-      const lineasValidas = form.lineas.filter(l => l.descripcion.trim() && Number(l.precio_unitario) > 0)
-      if (!lineasValidas.length) { setError('Añade al menos una línea con descripción y precio'); setSaving(false); return }
-
-      // Para cada línea con código: si coincide con un producto ya
-      // existente, se usa ese; si no, se crea un producto nuevo sobre
-      // la marcha (con stock 0 — la cantidad comprada se sumará justo
-      // después, igual que con cualquier producto ya existente).
-      const lineasConProducto = []
-      for (const l of lineasValidas) {
-        let productoId = l.producto_id
-        const ref = (l.referencia || '').trim()
-        if (!productoId && ref) {
-          const existente = productos.find(p => (p.referencia || '').toLowerCase() === ref.toLowerCase())
-          if (existente) {
-            productoId = existente.id
-          } else {
-            const { data: nuevoProd, error: errProd } = await upsertProducto({
-              empresa_id: empresa.id,
-              proveedor_id: form.proveedor_id,
-              nombre: l.descripcion || ref,
-              referencia: ref,
-              precio_compra: Number(l.precio_unitario) || 0,
-              iva_tasa: Number(l.iva_tasa),
-              stock_actual: 0,
-            })
-            if (errProd) { setError('Error al crear el producto "' + ref + '": ' + errProd.message); setSaving(false); return }
-            productoId = nuevoProd.id
-          }
-        }
-        lineasConProducto.push({ ...l, producto_id: productoId })
-      }
-
+    try {
+      const lineasConProducto = await resolverLineasConProducto(lineasValidas)
       const lineas = lineasConProducto.map(l => ({
         descripcion: l.descripcion,
-        cantidad: Number(l.cantidad),
-        precio_unitario: Number(l.precio_unitario),
-        iva_tasa: Number(l.iva_tasa),
-        subtotal: calcLinea(l),
+        cantidad: Number(l.cantidad) || 0,
+        precio_unitario: Number(l.precio_unitario) || 0,
+        iva_tasa: Number(l.iva_tasa) || 0,
+        recargo_tasa: proveedorConRE ? (l.recargo_tasa === '' ? tasaRE(l.iva_tasa) : Number(l.recargo_tasa)) : 0,
+        recargo_importe: proveedorConRE ? recargoLinea(l) : 0,
+        subtotal: calcBase(l),
         producto_id: l.producto_id || null,
       }))
 
-      const { error: err } = await createFacturaProveedor(factura, lineas)
-      if (err) { setError(err.message); setSaving(false); return }
+      if (modo === 'albaranes') {
+        const { error: err } = await crearFacturaDesdeAlbaranes(factura, lineas, seleccionados)
+        if (err) throw new Error(err.message)
+      } else {
+        const { error: err } = await createFacturaProveedor(factura, lineas)
+        if (err) throw new Error(err.message)
+      }
+    } catch (err) {
+      setError(err.message)
+      setSaving(false)
+      return
     }
 
     await cargar(empresa)
@@ -321,7 +334,13 @@ export default function FacturasProveedores({ session }) {
               </div>
             </div>
 
-            {modo === 'albaranes' ? (
+            {proveedorConRE && (
+              <p className="text-xs text-brand-500 bg-brand-500/10 border border-brand-500/30 rounded-lg px-3 py-2">
+                Este proveedor aplica recargo de equivalencia — indica el que te pongan en cada línea (o deja el valor por defecto).
+              </p>
+            )}
+
+            {modo === 'albaranes' && (
               <div>
                 <label className="label mb-2">Albaranes pendientes de este proveedor</label>
                 {!form.proveedor_id ? (
@@ -331,48 +350,25 @@ export default function FacturasProveedores({ session }) {
                 ) : !albaranesPendientes.length ? (
                   <p className="text-sm text-gray-600">Este proveedor no tiene albaranes pendientes de facturar.</p>
                 ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
                     {albaranesPendientes.map(a => (
                       <label key={a.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50 cursor-pointer hover:bg-gray-800">
                         <input type="checkbox" checked={seleccionados.includes(a.id)} onChange={() => toggleAlbaran(a.id)} />
                         <div className="flex-1 flex justify-between items-center text-sm">
                           <span className="text-gray-300">{a.numero || 'Sin número'} · {formatFecha(a.fecha_albaran)} · {(a.lineas_albaran_proveedor || []).length} línea(s)</span>
-                          <span className="font-mono text-white">{formatEuro(a.total)}</span>
+                          <span className="font-mono text-white">{a.total ? formatEuro(a.total) : 'sin precio'}</span>
                         </div>
                       </label>
                     ))}
                   </div>
                 )}
-
-                {seleccionados.length > 0 && (
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <label className="label mb-0">Líneas de la factura</label>
-                      <span className="text-xs text-gray-600">Puedes ajustar el precio si el proveedor cobra distinto a lo indicado en el albarán</span>
-                    </div>
-                    <div className="space-y-2">
-                      {form.lineas.map(l => (
-                        <div key={l._id} className="grid grid-cols-12 gap-2 items-center">
-                          <input className="input col-span-5 text-xs" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
-                          <input className="input col-span-2 text-xs" type="number" step="0.001" min="0" value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
-                          <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
-                          <select className="input col-span-2 text-xs" value={l.iva_tasa} onChange={e => setLinea(l._id, 'iva_tasa', e.target.value)}>
-                            <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
-                          </select>
-                          <span className="col-span-1 text-xs text-right font-mono text-gray-400">{formatEuro(calcLinea(l))}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-xs text-gray-600 mt-2">
-                      Si cambias la cantidad respecto al albarán, recuerda que el stock ya se sumó con la cantidad original — ajústalo a mano en Stock si hace falta.
-                    </p>
-                  </div>
-                )}
               </div>
-            ) : (
+            )}
+
+            {(modo === 'manual' || seleccionados.length > 0) && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <label className="label mb-0">Líneas</label>
+                  <label className="label mb-0">Líneas de la factura</label>
                   <button type="button" onClick={addLinea} className="text-xs text-brand-500 hover:underline">+ Añadir línea</button>
                 </div>
                 <div className="space-y-2">
@@ -397,13 +393,21 @@ export default function FacturasProveedores({ session }) {
                           }
                         }}
                       />
-                      <input className="input col-span-4 text-xs" placeholder="Descripción" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
+                      <input className="input col-span-3 text-xs" placeholder="Descripción" value={l.descripcion} onChange={e => setLinea(l._id, 'descripcion', e.target.value)} />
                       <input className="input col-span-1 text-xs" type="number" step="0.001" min="0" value={l.cantidad} onChange={e => setLinea(l._id, 'cantidad', e.target.value)} />
                       <input className="input col-span-2 text-xs" type="number" step="0.01" min="0" placeholder="Precio" value={l.precio_unitario} onChange={e => setLinea(l._id, 'precio_unitario', e.target.value)} />
                       <select className="input col-span-1 text-xs" value={l.iva_tasa} onChange={e => setLinea(l._id, 'iva_tasa', e.target.value)}>
                         <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
                       </select>
-                      <span className="col-span-1 text-xs text-center pt-2" title={l.referencia ? (l.producto_id ? 'Producto existente' : 'Se creará como producto nuevo') : 'Sin código: no afecta al stock'}>
+                      {proveedorConRE && (
+                        <input
+                          className="input col-span-1 text-xs" type="number" step="0.01" min="0"
+                          placeholder={`RE ${tasaRE(l.iva_tasa)}%`}
+                          value={l.recargo_tasa}
+                          onChange={e => setLinea(l._id, 'recargo_tasa', e.target.value)}
+                        />
+                      )}
+                      <span className={`text-xs text-center pt-2 ${proveedorConRE ? 'col-span-1' : 'col-span-2'}`} title={l.referencia ? (l.producto_id ? 'Producto existente' : 'Se creará como producto nuevo') : 'Sin código: no afecta al stock'}>
                         {l.referencia ? (l.producto_id ? '✅' : '🆕') : '—'}
                       </span>
                       <button type="button" onClick={() => removeLinea(l._id)} className="col-span-1 text-gray-600 hover:text-red-400 text-xs">✕</button>
@@ -414,7 +418,9 @@ export default function FacturasProveedores({ session }) {
                   {productos.filter(p => p.referencia).map(p => <option key={p.id} value={p.referencia} />)}
                 </datalist>
                 <p className="text-xs text-gray-600 mt-2">
-                  Usa este modo solo cuando no hay un albarán previo (por ejemplo, servicios). Aquí el stock se suma al guardar la factura.
+                  {modo === 'albaranes'
+                    ? 'Puedes ajustar cualquier dato respecto al albarán (el proveedor a veces cobra distinto), añadir líneas nuevas o quitar alguna.'
+                    : 'Usa este modo solo cuando no hay un albarán previo (por ejemplo, servicios). Aquí el stock se suma al guardar la factura.'}
                 </p>
               </div>
             )}
@@ -427,6 +433,7 @@ export default function FacturasProveedores({ session }) {
             <div className="flex justify-end gap-6 text-sm border-t border-gray-800 pt-3">
               <div>Subtotal <span className="font-mono text-gray-300 ml-2">{formatEuro(subtotal)}</span></div>
               <div>IVA <span className="font-mono text-gray-300 ml-2">{formatEuro(ivaTotal)}</span></div>
+              {proveedorConRE && <div>Recargo <span className="font-mono text-gray-300 ml-2">{formatEuro(recargoTotal)}</span></div>}
               <div className="font-bold">Total <span className="font-mono text-white ml-2">{formatEuro(total)}</span></div>
             </div>
 
