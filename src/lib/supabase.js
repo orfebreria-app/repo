@@ -508,15 +508,111 @@ export const enviarEmail = async ({ to, subject, html, fromName }) => {
   }
 }
 
+// ── Albaranes de proveedor ─────────────────────────────
+export const getAlbaranesProveedor = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('albaranes_proveedor')
+    .select('*, proveedores(nombre)')
+    .eq('empresa_id', empresaId)
+    .order('fecha_albaran', { ascending: false })
+  return { data: data || [], error }
+}
 
-// Esta función se mantiene aquí como stub para compatibilidad con imports existentes.
-// La implementación real está más arriba en este mismo archivo.
+export const getAlbaranesPendientes = async (empresaId, proveedorId) => {
+  const { data, error } = await supabase
+    .from('albaranes_proveedor')
+    .select('*, lineas_albaran_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .eq('proveedor_id', proveedorId)
+    .eq('estado', 'pendiente')
+    .order('fecha_albaran', { ascending: true })
+  return { data: data || [], error }
+}
 
-export const getAlbaranesProveedor = async () => ({ data: [], error: null })
-export const createAlbaranProveedor = async () => ({ data: null, error: null })
-export const deleteAlbaranProveedor = async () => ({ error: null })
-export const getAlbaranesPendientes = async () => ({ data: [], error: null })
-export const crearFacturaDesdeAlbaranes = async () => ({ data: null, error: null })
-export const getFacturasParaInforme = async () => ({ data: [], error: null })
-export const getComprasParaInforme = async () => ({ data: [], error: null })
-export const verificarFactura = async () => ({ data: null, error: null })
+export const createAlbaranProveedor = async (albaran, lineas) => {
+  const { data: alb, error: errAlb } = await supabase
+    .from('albaranes_proveedor')
+    .insert(albaran)
+    .select()
+    .single()
+  if (errAlb) return { data: null, error: errAlb }
+
+  const items = lineas.map((l, i) => ({ ...l, albaran_id: alb.id, orden: i }))
+  const { error: errL } = await supabase.from('lineas_albaran_proveedor').insert(items)
+  if (errL) return { data: null, error: errL }
+
+  for (const l of lineas.filter(l => l.producto_id && Number(l.cantidad) > 0)) {
+    await supabase.rpc('mover_stock', {
+      p_producto_id: l.producto_id,
+      p_delta: Number(l.cantidad),
+      p_tipo: 'entrada',
+      p_referencia_id: alb.id,
+      p_referencia_tipo: 'albaran',
+      p_notas: `Albarán ${albaran.numero || alb.id.slice(0, 8)}`,
+    })
+  }
+
+  return { data: alb, error: null }
+}
+
+export const deleteAlbaranProveedor = async (id) => {
+  const { error } = await supabase.from('albaranes_proveedor').delete().eq('id', id)
+  return { error }
+}
+
+export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) => {
+  const { data: fp, error: errFp } = await supabase
+    .from('facturas_proveedor')
+    .insert(factura)
+    .select()
+    .single()
+  if (errFp) return { data: null, error: errFp }
+
+  const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
+  const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
+  if (errL) return { data: null, error: errL }
+
+  const { error: errUpd } = await supabase
+    .from('albaranes_proveedor')
+    .update({ estado: 'facturado', factura_id: fp.id })
+    .in('id', albaranIds)
+  if (errUpd) return { data: null, error: errUpd }
+
+  return { data: fp, error: null }
+}
+
+// ── Informe de IVA ─────────────────────────────────────
+export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
+  const { data, error } = await supabase
+    .from('facturas')
+    .select('*, conceptos_factura(*)')
+    .eq('empresa_id', empresaId)
+    .gte('fecha_emision', desde)
+    .lte('fecha_emision', hasta)
+    .not('estado', 'in', '(borrador,cancelada)')
+  return { data: data || [], error }
+}
+
+export const getComprasParaInforme = async (empresaId, desde, hasta) => {
+  const { data, error } = await supabase
+    .from('facturas_proveedor')
+    .select('*, lineas_factura_proveedor(*)')
+    .eq('empresa_id', empresaId)
+    .gte('fecha_factura', desde)
+    .lte('fecha_factura', hasta)
+    .neq('estado', 'cancelada')
+  return { data: data || [], error }
+}
+
+// ── Verificación pública de facturas (para /verificar) ─
+export const verificarFactura = async ({ folio, nif, total, fecha }) => {
+  const { data, error } = await supabase.rpc('verificar_factura', {
+    p_folio: folio,
+    p_nif:   nif,
+    p_total: total,
+    p_fecha: fecha,
+  })
+  if (error) return { data: null, error }
+  return { data: data?.[0] || null, error: null }
+}
+
