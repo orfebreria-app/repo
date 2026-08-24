@@ -9,7 +9,7 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
-// ── Recargo de Equivalencia ───────────────────────────
+// ── Recargo de Equivalencia ─────────────────────────
 // Devuelve la tasa RE correspondiente al IVA
 export const tasaRE = (ivaTasa) => {
   const t = Number(ivaTasa)
@@ -19,7 +19,7 @@ export const tasaRE = (ivaTasa) => {
   return 0
 }
 
-// ── Auth helpers ──────────────────────────────────────
+// ── Auth helpers ──────────────────────────
 export const signIn = (email, password) =>
   supabase.auth.signInWithPassword({ email, password })
 
@@ -32,7 +32,7 @@ export const signOut = () =>
 export const getUser = () =>
   supabase.auth.getUser()
 
-// ── Empresa helpers ───────────────────────────────────
+// ── Empresa helpers ─────────────────────────
 export const getEmpresa = async (userId) => {
   const { data, error } = await supabase
     .from('empresas')
@@ -51,7 +51,7 @@ export const upsertEmpresa = async (empresa) => {
   return { data, error }
 }
 
-// ── Clientes helpers ──────────────────────────────────
+// ── Clientes helpers ────────────────────────
 export const getClientes = async (empresaId) => {
   const { data, error } = await supabase
     .from('clientes')
@@ -75,7 +75,7 @@ export const deleteCliente = async (id) => {
   return { error }
 }
 
-// ── Facturas helpers ──────────────────────────────────
+// ── Facturas helpers ────────────────────────
 export const getFacturas = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas')
@@ -183,7 +183,7 @@ export const deleteFactura = async (id) => {
   return { error }
 }
 
-// ── Helpers de formato ────────────────────────────────
+// ── Helpers de formato ──────────────────────
 export const formatEuro = (n) =>
   new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 
@@ -201,7 +201,7 @@ export const calcPrecioVentaSugerido = ({ precioCompra = 0, multiplicadorProduct
   return +(base * multiplicador).toFixed(2)
 }
 
-// ── Proveedores ───────────────────────────────────────
+// ── Proveedores ────────────────────────
 export const getProveedores = async (empresaId) => {
   const { data, error } = await supabase
     .from('proveedores')
@@ -226,7 +226,7 @@ export const deleteProveedor = async (id) => {
   return { error }
 }
 
-// ── Productos ─────────────────────────────────────────
+// ── Productos ─────────────────────────
 export const getProductos = async (empresaId) => {
   const { data, error } = await supabase
     .from('productos')
@@ -251,7 +251,7 @@ export const deleteProducto = async (id) => {
   return { error }
 }
 
-// ── Movimientos de stock ──────────────────────────────
+// ── Movimientos de stock ──────────────────
 export const getMovimientos = async (empresaId, productoId = null) => {
   let q = supabase
     .from('movimientos_stock')
@@ -346,7 +346,7 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
   return { error: null }
 }
 
-// ── Facturas de proveedor (Compras) ───────────────────
+// ── Facturas de proveedor (Compras) ─────────────
 export const getFacturasProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
@@ -434,7 +434,7 @@ export const deleteFacturaProveedor = async (id) => {
   return { error }
 }
 
-// ── Recargo de Equivalencia ───────────────────────────
+// ── Recargo de Equivalencia ─────────────────────────
 export const RE_TASAS = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
 
 export const calcRecargoLinea = (base, ivaTasa) => {
@@ -442,7 +442,7 @@ export const calcRecargoLinea = (base, ivaTasa) => {
   return +(base * reTasa / 100).toFixed(2)
 }
 
-// ── Editar factura completa ───────────────────────────
+// ── Editar factura completa ─────────────────
 export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conceptosNuevos, conceptosOriginales) => {
   // 1. Actualizar cabecera
   const { error: errCab } = await supabase
@@ -492,23 +492,7 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
   return { error: null }
 }
 
-// ── Envío de email ─────────────────────────────────────
-export const enviarEmail = async ({ to, subject, html, fromName }) => {
-  try {
-    const res = await fetch('/api/send-email', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, subject, html, fromName }),
-    })
-    const data = await res.json()
-    if (!res.ok) return { error: data.error || 'Error al enviar' }
-    return { ok: true }
-  } catch (err) {
-    return { error: err.message }
-  }
-}
-
-// ── Albaranes de proveedor ─────────────────────────────
+// ── Albaranes de proveedor ─────────────────
 export const getAlbaranesProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('albaranes_proveedor')
@@ -581,7 +565,7 @@ export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) =>
   return { data: fp, error: null }
 }
 
-// ── Informe de IVA ─────────────────────────────────────
+// ── Informe de IVA ───────────────────────
 export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
   const { data, error } = await supabase
     .from('facturas')
@@ -616,3 +600,96 @@ export const verificarFactura = async ({ folio, nif, total, fecha }) => {
   return { data: data?.[0] || null, error: null }
 }
 
+// ── Envío de email ───────────────────────
+export const enviarEmail = async ({ to, subject, html, fromName }) => {
+  try {
+    const res = await fetch('/api/send-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, html, fromName }),
+    })
+    const data = await res.json()
+    if (!res.ok) return { error: data.error || 'Error al enviar' }
+    return { ok: true }
+  } catch (err) {
+    return { error: err.message }
+  }
+}
+
+// ============================================================
+// AÑADIDO: Gestión avanzada de proveedores y precios masivos
+// (Nuevas funciones - no reemplazan nada existente)
+// ============================================================
+
+export const getProductosPorProveedor = async (proveedorId) => {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('id, nombre, referencia, categoria, precio_compra, precio_venta, multiplicador_venta, precio_venta_manual, activo')
+    .eq('proveedor_id', proveedorId)
+    .order('categoria', { ascending: true })
+    .order('nombre', { ascending: true })
+  return { data, error }
+}
+
+export const getCategoriasPorProveedor = async (proveedorId) => {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('categoria')
+    .eq('proveedor_id', proveedorId)
+    .not('categoria', 'is', null)
+  if (error) return { data: [], error }
+  const categorias = [...new Set(data.map(p => p.categoria).filter(Boolean))]
+  return { data: categorias, error: null }
+}
+
+export const actualizarProveedor = async (proveedorId, campos) => {
+  const { data, error } = await supabase
+    .from('proveedores')
+    .update(campos)
+    .eq('id', proveedorId)
+    .select()
+    .single()
+  return { data, error }
+}
+
+export const previsualizarPreciosProveedor = ({ productos, coeficiente, respetarCoeficienteProducto }) => {
+  return productos.map(p => {
+    const compra = Number(p.precio_compra) || 0
+    const coefAplicado = respetarCoeficienteProducto && p.multiplicador_venta
+      ? Number(p.multiplicador_venta)
+      : Number(coeficiente)
+    const nuevoPrecio = Math.round(compra * coefAplicado * 100) / 100
+    return {
+      ...p,
+      coeficiente_aplicado: coefAplicado,
+      precio_venta_actual: Number(p.precio_venta) || 0,
+      precio_venta_propuesto: nuevoPrecio,
+      diferencia: Math.round((nuevoPrecio - (Number(p.precio_venta) || 0)) * 100) / 100
+    }
+  })
+}
+
+export const aplicarPreciosMasivos = async ({ productosIds, coeficiente, forzarCoeficienteEnProducto }) => {
+  const resultados = []
+  for (const producto of productosIds) {
+    const compra = Number(producto.precio_compra) || 0
+    const coefAplicado = producto.coeficiente_aplicado
+    const nuevoPrecio = Math.round(compra * coefAplicado * 100) / 100
+
+    const payload = { precio_venta: nuevoPrecio }
+    if (forzarCoeficienteEnProducto) {
+      payload.multiplicador_venta = coefAplicado
+    }
+
+    const { data, error } = await supabase
+      .from('productos')
+      .update(payload)
+      .eq('id', producto.id)
+      .select()
+      .single()
+
+    resultados.push({ id: producto.id, nombre: producto.nombre, data, error })
+  }
+  const errores = resultados.filter(r => r.error)
+  return { resultados, error: errores.length > 0 ? errores : null }
+}

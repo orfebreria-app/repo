@@ -16,6 +16,7 @@ import AlbaranesProveedor from './pages/AlbaranesProveedor'
 import FacturasProveedores from './pages/FacturasProveedores'
 import InformeIVA from './pages/InformeIVA'
 import Verificar from './pages/Verificar'
+import ProveedoresPrecios from './pages/ProveedoresPrecios'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -64,6 +65,7 @@ export default function App() {
         <Route path="/albaranes-proveedor" element={<AlbaranesProveedor session={session} />} />
         <Route path="/facturas-proveedores" element={<FacturasProveedores session={session} />} />
         <Route path="/informe-iva"    element={<InformeIVA session={session} />} />
+        <Route path="/proveedores-precios" element={<ProveedoresPrecios session={session} />} />
         <Route path="/configuracion"  element={<Configuracion session={session} />} />
         <Route path="*"               element={<Navigate to="/dashboard" replace />} />
       </Routes>
