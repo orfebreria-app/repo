@@ -5,6 +5,7 @@ import { generarPresupuestoPDF } from '../lib/presupuestoPDF'
 import { format, addDays } from 'date-fns'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
+
 const ESTADOS = ['todos','borrador','enviado','aceptado','rechazado','caducado']
 const badge = (e) => ({
   aceptado:  'bg-green-900/50 text-green-400 border-green-800',
@@ -14,6 +15,7 @@ const badge = (e) => ({
   caducado:  'bg-orange-900/50 text-orange-400 border-orange-800',
 }[e] || 'bg-gray-800 text-gray-400 border-gray-700')
 
+
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
   descripcion: '', cantidad: 1, precio_unitario: '', iva_tasa: 21, descuento: 0,
@@ -22,6 +24,7 @@ const calcLinea = (l) => {
   const base = Number(l.cantidad) * Number(l.precio_unitario || 0)
   return +(base * (1 - Number(l.descuento) / 100)).toFixed(2)
 }
+
 
 export default function Presupuestos({ session }) {
   const navigate = useNavigate()
@@ -36,6 +39,8 @@ export default function Presupuestos({ session }) {
   const [saving,    setSaving]    = useState(false)
   const [error,     setError]     = useState('')
   const [emailPres, setEmailPres] = useState(null)
+  const [duplicandoId, setDuplicandoId] = useState(null)
+
 
   const hoy = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -45,6 +50,7 @@ export default function Presupuestos({ session }) {
   })
   const [lineas, setLineas] = useState([lineaVacia()])
 
+
   const cargar = async (emp) => {
     const { data } = await supabase
       .from('presupuestos')
@@ -53,6 +59,7 @@ export default function Presupuestos({ session }) {
       .order('creado_en', { ascending: false })
     setLista(data || [])
   }
+
 
   useEffect(() => {
     const init = async () => {
@@ -71,14 +78,17 @@ export default function Presupuestos({ session }) {
     init()
   }, [session])
 
+
   // Totales
   const subtotal = lineas.reduce((s,l) => s + calcLinea(l), 0)
   const ivaTotal = lineas.reduce((s,l) => s + +(calcLinea(l) * Number(l.iva_tasa) / 100).toFixed(2), 0)
   const total    = +(subtotal + ivaTotal).toFixed(2)
 
+
   const addLinea    = () => setLineas(l => [...l, lineaVacia()])
   const removeLinea = (id) => lineas.length > 1 && setLineas(l => l.filter(x => x._id !== id))
   const updateLinea = (id, f, v) => setLineas(l => l.map(x => x._id===id ? {...x,[f]:v} : x))
+
 
   const openNuevo = () => {
     const cond = empresa?.presupuesto_config?.condiciones || ''
@@ -89,6 +99,7 @@ export default function Presupuestos({ session }) {
     setModal(true)
   }
 
+
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.cliente_id) return setError('Selecciona un cliente')
@@ -96,12 +107,15 @@ export default function Presupuestos({ session }) {
     setSaving(true)
     const numero = `${empresa.serie_presupuesto||'PRE'}-${String(empresa.siguiente_presupuesto||1).padStart(4,'0')}`
 
+
     const { data: pres, error: err } = await supabase
       .from('presupuestos')
       .insert({ empresa_id:empresa.id, cliente_id:form.cliente_id, numero, fecha_emision:form.fecha_emision, fecha_validez:form.fecha_validez||null, estado:form.estado, subtotal, iva_total:ivaTotal, total, notas:form.notas||null, condiciones:form.condiciones||null })
       .select().single()
 
+
     if (err) { setError(err.message); setSaving(false); return }
+
 
     await supabase.from('conceptos_presupuesto').insert(
       lineas.map((l,i) => ({ presupuesto_id:pres.id, descripcion:l.descripcion, cantidad:Number(l.cantidad), precio_unitario:Number(l.precio_unitario), iva_tasa:Number(l.iva_tasa), descuento:Number(l.descuento), subtotal:calcLinea(l), orden:i }))
@@ -113,10 +127,12 @@ export default function Presupuestos({ session }) {
     setModal(false)
   }
 
+
   const handleEstado = async (id, estado) => {
     await supabase.from('presupuestos').update({ estado }).eq('id', id)
     await cargar(empresa)
   }
+
 
   const handleEdit = async (id) => {
     const { data: pres } = await supabase
@@ -149,6 +165,7 @@ export default function Presupuestos({ session }) {
     setModal(true)
   }
 
+
   const handleSaveEdit = async (e) => {
     e.preventDefault()
     if (!form.cliente_id) return setError('Selecciona un cliente')
@@ -173,11 +190,13 @@ export default function Presupuestos({ session }) {
     setEditando(null)
   }
 
+
   const handleDelete = async (id) => {
     if (!confirm('¿Eliminar este presupuesto?')) return
     await supabase.from('presupuestos').delete().eq('id', id)
     await cargar(empresa)
   }
+
 
   const handlePDF = async (id) => {
     const { data: pres } = await supabase
@@ -189,19 +208,85 @@ export default function Presupuestos({ session }) {
     doc.save(`${pres.numero}.pdf`)
   }
 
+
   const handleConvertir = async (id) => {
     if (!confirm('¿Convertir este presupuesto en factura?')) return
     navigate(`/facturas/nueva?desde_presupuesto=${id}`)
   }
 
+
+  const handleDuplicar = async (id) => {
+    if (!confirm('¿Crear una copia de este presupuesto como borrador?')) return
+    setDuplicandoId(id)
+    const { data: original, error: errGet } = await supabase
+      .from('presupuestos')
+      .select('*, conceptos_presupuesto(*)')
+      .eq('id', id).single()
+
+    if (errGet || !original) {
+      setDuplicandoId(null)
+      alert('Error al leer el presupuesto original: ' + (errGet?.message || 'No encontrado'))
+      return
+    }
+
+    const numero = `${empresa.serie_presupuesto || 'PRE'}-${String(empresa.siguiente_presupuesto || 1).padStart(4, '0')}`
+
+    const { data: nuevo, error: errIns } = await supabase
+      .from('presupuestos')
+      .insert({
+        empresa_id: empresa.id,
+        cliente_id: original.cliente_id,
+        numero,
+        fecha_emision: hoy,
+        fecha_validez: format(addDays(new Date(), 30), 'yyyy-MM-dd'),
+        estado: 'borrador',
+        subtotal: original.subtotal,
+        iva_total: original.iva_total,
+        total: original.total,
+        notas: original.notas || null,
+        condiciones: original.condiciones || null,
+      })
+      .select().single()
+
+    if (errIns) {
+      setDuplicandoId(null)
+      alert('Error al duplicar el presupuesto: ' + errIns.message)
+      return
+    }
+
+    const conceptosOriginales = (original.conceptos_presupuesto || []).sort((a, b) => a.orden - b.orden)
+    await supabase.from('conceptos_presupuesto').insert(
+      conceptosOriginales.map((c, i) => ({
+        presupuesto_id: nuevo.id,
+        descripcion: c.descripcion,
+        cantidad: c.cantidad,
+        precio_unitario: c.precio_unitario,
+        iva_tasa: c.iva_tasa,
+        descuento: c.descuento || 0,
+        subtotal: c.subtotal,
+        orden: i,
+      }))
+    )
+
+    await supabase.from('empresas').update({ siguiente_presupuesto: (empresa.siguiente_presupuesto || 1) + 1 }).eq('id', empresa.id)
+    setEmpresa(e => ({ ...e, siguiente_presupuesto: (e.siguiente_presupuesto || 1) + 1 }))
+    await cargar(empresa)
+    setDuplicandoId(null)
+    alert(`Presupuesto duplicado como borrador: ${nuevo.numero}`)
+  }
+
+
   const filtrados = lista
     .filter(p => filtro === 'todos' || p.estado === filtro)
     .filter(p => p.numero.toLowerCase().includes(buscar.toLowerCase()) || (p.clientes?.nombre||'').toLowerCase().includes(buscar.toLowerCase()))
 
+
   if (loading) return <Skeleton />
+
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+
 
       {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -210,6 +295,7 @@ export default function Presupuestos({ session }) {
           <span>+</span> Nuevo presupuesto
         </button>
       </div>
+
 
       {/* Filtros */}
       <div className="flex gap-2 flex-wrap">
@@ -222,8 +308,10 @@ export default function Presupuestos({ session }) {
         ))}
       </div>
 
+
       <input className="input max-w-sm" placeholder="🔍  Buscar por número o cliente..."
         value={buscar} onChange={e => setBuscar(e.target.value)} />
+
 
       {/* Tabla */}
       <div className="card p-0 overflow-hidden">
@@ -263,6 +351,10 @@ export default function Presupuestos({ session }) {
                   <td className="py-3 px-4">
                     <div className="flex gap-1 justify-end">
                       <button onClick={() => handleEdit(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Editar">✏️</button>
+                      <button onClick={() => handleDuplicar(p.id)} disabled={duplicandoId === p.id}
+                        className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors disabled:opacity-50" title="Duplicar presupuesto">
+                        {duplicandoId === p.id ? '⏳' : '🧬'} Duplicar
+                      </button>
                       <button onClick={() => handlePDF(p.id)} className="text-xs text-gray-500 hover:text-brand-500 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Descargar PDF">📥 PDF</button>
                       <button onClick={() => setEmailPres(p)} className="text-xs text-gray-500 hover:text-blue-400 px-2 py-1 rounded hover:bg-gray-800 transition-colors" title="Enviar por email">📧</button>
                       {p.estado === 'aceptado' && (
@@ -278,6 +370,7 @@ export default function Presupuestos({ session }) {
         )}
       </div>
 
+
       {filtrados.length > 0 && (
         <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
           <span>{filtrados.length} presupuesto{filtrados.length!==1?'s':''}</span>
@@ -285,6 +378,7 @@ export default function Presupuestos({ session }) {
           <span>Total: <strong className="text-white">{formatEuro(filtrados.reduce((s,p)=>s+Number(p.total),0))}</strong></span>
         </div>
       )}
+
 
       {/* Modal nuevo presupuesto */}
       {modal && (
@@ -298,6 +392,7 @@ export default function Presupuestos({ session }) {
               </div>
               <button onClick={() => setModal(false)} className="text-gray-500 hover:text-white text-2xl">×</button>
             </div>
+
 
             <form onSubmit={editando ? handleSaveEdit : handleSave} className="p-6 space-y-6">
               {/* Datos */}
@@ -318,6 +413,7 @@ export default function Presupuestos({ session }) {
                   <input type="date" className="input" value={form.fecha_validez} onChange={e => setForm({...form,fecha_validez:e.target.value})} />
                 </div>
               </div>
+
 
               {/* Conceptos */}
               <div className="space-y-3">
@@ -362,6 +458,7 @@ export default function Presupuestos({ session }) {
                   </div>
                 ))}
 
+
                 {/* Totales */}
                 <div className="flex justify-end pt-2">
                   <div className="bg-gray-800/50 rounded-xl p-4 space-y-1.5 min-w-[200px]">
@@ -371,6 +468,7 @@ export default function Presupuestos({ session }) {
                   </div>
                 </div>
               </div>
+
 
               {/* Condiciones y notas */}
               <div className="grid md:grid-cols-2 gap-4">
@@ -387,7 +485,9 @@ export default function Presupuestos({ session }) {
                 </div>
               </div>
 
+
               {error && <p className="text-red-400 text-sm">⚠️ {error}</p>}
+
 
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => { setModal(false); setEditando(null) }} className="btn-secondary">Cancelar</button>
@@ -397,6 +497,7 @@ export default function Presupuestos({ session }) {
           </div>
         </div>
       )}
+
 
       {emailPres && (
         <ModalEnviarEmail
@@ -411,6 +512,7 @@ export default function Presupuestos({ session }) {
     </div>
   )
 }
+
 
 const Skeleton = () => (
   <div className="max-w-5xl mx-auto space-y-4 animate-pulse">
