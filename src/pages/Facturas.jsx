@@ -2,15 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
-         updateFacturaCompleta, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
+         updateFacturaCompleta, duplicarFactura, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
 import { generarPDF } from '../lib/pdfGenerator'
 import { buildFacturaEXML, downloadXml } from '../lib/facturae'
 import { buildVerificationUrl } from '../lib/verificacion'
 import ModalPlantilla from '../components/ModalPlantilla'
 import ModalEnviarEmail from '../components/ModalEnviarEmail'
 
+
 const ESTADOS = ['todos','borrador','emitida','pagada','vencida','cancelada']
 const badge = (e) => ({ pagada:'badge-pagada', emitida:'badge-emitida', borrador:'badge-borrador', vencida:'badge-vencida', cancelada:'badge-cancelada' }[e] || 'badge-borrador')
+
 
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
@@ -18,11 +20,13 @@ const lineaVacia = () => ({
   descuento: 0, recargo_tasa: 0, recargo_importe: 0, producto_id: null,
 })
 
+
 const calcLinea = (l) => {
   const base = Number(l.cantidad) * Number(l.precio_unitario || 0)
   const desc = base * (Number(l.descuento) / 100)
   return +(base - desc).toFixed(2)
 }
+
 
 export default function Facturas({ session }) {
   const [empresa,     setEmpresa]     = useState(null)
@@ -35,7 +39,9 @@ export default function Facturas({ session }) {
   const [emailFactura, setEmailFactura] = useState(null)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [generatingPDFs, setGeneratingPDFs] = useState(false)
+  const [duplicandoId, setDuplicandoId] = useState(null)
   const selectAllRef = useRef(null)
+
 
   const sortFacturas = (arr) => [...(arr || [])].sort((a, b) => {
     const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
@@ -43,13 +49,16 @@ export default function Facturas({ session }) {
     return numB - numA
   })
 
+
   const cargar = async (emp) => {
     const { data } = await getFacturas(emp.id)
     setFacturas(sortFacturas(data))
   }
 
+
   const selectedFacturas = facturas.filter(f => selectedIds.has(f.id))
   const selectedTotal = selectedFacturas.reduce((sum, f) => sum + Number(f.total || 0), 0)
+
 
   const toggleSeleccion = (id) => setSelectedIds(prev => {
     const next = new Set(prev)
@@ -57,6 +66,7 @@ export default function Facturas({ session }) {
     else next.add(id)
     return next
   })
+
 
   const seleccionarTodos = () => setSelectedIds(prev => {
     const ids = filtradas.map(f => f.id)
@@ -69,7 +79,9 @@ export default function Facturas({ session }) {
     return next
   })
 
+
   const buildQrTextForFactura = (factura) => buildVerificationUrl({ empresa, factura })
+
 
   const handleDownloadSelectedPDFs = async () => {
     if (!selectedFacturas.length) return
@@ -100,6 +112,7 @@ export default function Facturas({ session }) {
     }
   }
 
+
   const handleDownloadSelectedFacturaEXMLs = async () => {
     if (!selectedFacturas.length || !empresa) return
     try {
@@ -121,6 +134,7 @@ export default function Facturas({ session }) {
       alert('Error al exportar los XML. Inténtalo de nuevo.')
     }
   }
+
 
   const handleExportFacturaE = async (id) => {
     if (!id || !empresa) return
@@ -145,6 +159,7 @@ export default function Facturas({ session }) {
     }
   }
 
+
   const handlePrintResumen = () => {
     if (!selectedFacturas.length) return
     const rows = selectedFacturas.map(f => ({
@@ -154,6 +169,7 @@ export default function Facturas({ session }) {
       importe: formatEuro(f.total),
       folio: f.folio || '—',
     }))
+
 
     const html = `<!doctype html>
       <html>
@@ -193,6 +209,7 @@ export default function Facturas({ session }) {
         </body>
       </html>`
 
+
     const printWindow = window.open('', '_blank')
     if (!printWindow) {
       alert('No se pudo abrir la ventana de impresión. Revisa el bloqueador de ventanas emergentes.')
@@ -204,6 +221,7 @@ export default function Facturas({ session }) {
     printWindow.onload = () => printWindow.print()
   }
 
+
   useEffect(() => {
     const init = async () => {
       const { data: emp } = await getEmpresa(session.user.id)
@@ -214,27 +232,42 @@ export default function Facturas({ session }) {
     init()
   }, [session])
 
+
   const handleEstado  = async (id, estado) => { await updateEstadoFactura(id, estado); await cargar(empresa) }
   const handleDelete  = async (id) => { if (!confirm('¿Eliminar esta factura?')) return; await deleteFactura(id); await cargar(empresa) }
   const handlePDF     = async (id) => { const { data } = await getFactura(id); if (data) setPdfFactura(data) }
   const handleEdit    = async (id) => { const { data } = await getFactura(id); if (data) setEditFactura(data) }
+  const handleDuplicar = async (id) => {
+    if (!confirm('¿Crear una copia de esta factura como borrador?')) return
+    setDuplicandoId(id)
+    const { data, error } = await duplicarFactura(id)
+    setDuplicandoId(null)
+    if (error) { alert('Error al duplicar la factura: ' + error.message); return }
+    await cargar(empresa)
+    if (data) alert(`Factura duplicada como borrador: ${data.folio}`)
+  }
+
 
   const filtradas = sortFacturas(facturas
     .filter(f => filtro === 'todos' || f.estado === filtro)
     .filter(f => f.folio.toLowerCase().includes(buscar.toLowerCase()) || (f.clientes?.nombre || '').toLowerCase().includes(buscar.toLowerCase()))
   )
 
+
   const visibleCount = filtradas.length
   const visibleSelectedCount = filtradas.filter(f => selectedIds.has(f.id)).length
   const allVisibleSelected = visibleCount > 0 && visibleSelectedCount === visibleCount
   const someVisibleSelected = visibleSelectedCount > 0 && visibleSelectedCount < visibleCount
+
 
   useEffect(() => {
     if (!selectAllRef.current) return
     selectAllRef.current.indeterminate = someVisibleSelected
   }, [someVisibleSelected])
 
+
   if (loading) return <Skeleton />
+
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -242,6 +275,7 @@ export default function Facturas({ session }) {
         <h1 className="text-2xl font-bold text-white">Facturas</h1>
         <Link to="/facturas/nueva" className="btn-primary flex items-center gap-2">+ Nueva Factura</Link>
       </div>
+
 
       <div className="flex gap-2 flex-wrap">
         {ESTADOS.map(e => (
@@ -253,8 +287,10 @@ export default function Facturas({ session }) {
         ))}
       </div>
 
+
       <input className="input max-w-sm" placeholder="🔍  Buscar por folio o cliente..."
         value={buscar} onChange={e => setBuscar(e.target.value)} />
+
 
       {selectedFacturas.length > 0 && (
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between py-3 px-4 rounded-xl bg-gray-900 border border-gray-800">
@@ -279,6 +315,7 @@ export default function Facturas({ session }) {
           </div>
         </div>
       )}
+
 
       <div className="card p-0 overflow-hidden">
         {filtradas.length === 0 ? (
@@ -325,6 +362,11 @@ export default function Facturas({ session }) {
                         className="text-xs text-gray-500 hover:text-yellow-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                         ✏️ Editar
                       </button>
+                      <button onClick={() => handleDuplicar(f.id)} disabled={duplicandoId === f.id}
+                        className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800 disabled:opacity-50"
+                        title="Duplicar factura">
+                        {duplicandoId === f.id ? '⏳' : '🧬'} Duplicar
+                      </button>
                       <button onClick={() => handlePDF(f.id)}
                         className="text-xs text-gray-500 hover:text-brand-500 transition-colors px-2 py-1 rounded hover:bg-gray-800">
                         📥 PDF
@@ -351,6 +393,7 @@ export default function Facturas({ session }) {
         )}
       </div>
 
+
       {filtradas.length > 0 && (
         <div className="flex gap-4 text-sm text-gray-500 flex-wrap">
           <span>{filtradas.length} factura{filtradas.length !== 1 ? 's' : ''}</span>
@@ -358,6 +401,7 @@ export default function Facturas({ session }) {
           <span>Total: <strong className="text-white">{formatEuro(filtradas.reduce((s,f) => s + Number(f.total), 0))}</strong></span>
         </div>
       )}
+
 
       {pdfFactura  && <ModalPlantilla factura={pdfFactura} empresa={empresa} onClose={() => setPdfFactura(null)} />}
       {editFactura && empresa && (
@@ -381,6 +425,7 @@ export default function Facturas({ session }) {
   )
 }
 
+
 // ── Modal Editar Factura ────────────────────────────────
 function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
   const [clientes,    setClientes]    = useState([])
@@ -391,6 +436,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
   const [lineaActiva, setLineaActiva] = useState(null)
   const [clienteRE,   setClienteRE]   = useState(!!factura.clientes?.recargo_equivalencia)
 
+
   const [form, setForm] = useState({
     folio:             factura.folio,
     cliente_id:        factura.cliente_id,
@@ -399,6 +445,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
     estado:            factura.estado,
     notas:             factura.notas || '',
   })
+
 
   const [lineas, setLineas] = useState(
     (factura.conceptos_factura || [])
@@ -416,18 +463,22 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
       }))
   )
 
+
   useEffect(() => {
     getClientes(empresa.id).then(({ data }) => setClientes(data || []))
     getProductos(empresa.id).then(({ data }) => setProductos(data || []))
   }, [empresa.id])
 
+
   const addLinea    = () => setLineas(l => [...l, lineaVacia()])
   const removeLinea = (id) => lineas.length > 1 && setLineas(l => l.filter(x => x._id !== id))
   const updateLinea = (id, field, val) => setLineas(l => l.map(x => x._id === id ? {...x, [field]: val} : x))
 
+
   const prodsFiltrados = busqProd.length > 1
     ? productos.filter(p => p.nombre.toLowerCase().includes(busqProd.toLowerCase()) || (p.referencia||'').toLowerCase().includes(busqProd.toLowerCase()))
     : []
+
 
   const seleccionarProd = (prod, lineaId) => {
     setLineas(l => l.map(x => x._id === lineaId ? {
@@ -440,16 +491,19 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
     setBusqProd(''); setLineaActiva(null)
   }
 
+
   const subtotal = lineas.reduce((s, l) => s + calcLinea(l), 0)
   const ivaTotal = lineas.reduce((s, l) => s + +(calcLinea(l) * Number(l.iva_tasa) / 100).toFixed(2), 0)
   const reTotal  = lineas.reduce((s, l) => s + +(calcLinea(l) * Number(l.recargo_tasa || 0) / 100).toFixed(2), 0)
   const total    = +(subtotal + ivaTotal + reTotal).toFixed(2)
+
 
   const handleSave = async () => {
     setError('')
     if (!form.folio.trim())   return setError('El número de factura es obligatorio')
     if (!form.cliente_id)     return setError('Selecciona un cliente')
     if (lineas.some(l => !l.descripcion.trim() || l.precio_unitario === '' || l.precio_unitario === null || l.precio_unitario === undefined)) return setError('Completa todos los conceptos')
+
 
     setSaving(true)
     const cabecera = {
@@ -471,6 +525,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
       }
     })
 
+
     const { error: err } = await updateFacturaCompleta(
       factura.id, empresa.id, cabecera, conceptosNuevos, factura.conceptos_factura
     )
@@ -478,11 +533,13 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
     onSaved()
   }
 
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto">
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
       <div className="relative rounded-2xl w-full max-w-4xl shadow-2xl my-8"
         style={{ background: '#161410', border: '1px solid #2a2418' }}>
+
 
         <div className="flex items-center justify-between px-6 py-4 sticky top-0 rounded-t-2xl z-10"
           style={{ background: '#161410', borderBottom: '1px solid #2a2418' }}>
@@ -492,6 +549,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-2xl leading-none">×</button>
         </div>
+
 
         <div className="p-6 space-y-5">
           {/* Cabecera */}
@@ -535,11 +593,13 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
             </div>
           </div>
 
+
           {clienteRE && (
             <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(201,168,76,0.1)', border: '1px solid rgba(201,168,76,0.3)', color: '#C9A84C' }}>
               ⚠️ Cliente con <strong>Recargo de Equivalencia</strong> — actívalo por línea pulsando el botón RE
             </div>
           )}
+
 
           {/* Conceptos */}
           <div className="space-y-2">
@@ -547,6 +607,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
               <h4 className="font-bold text-white text-sm">Conceptos</h4>
               <button type="button" onClick={addLinea} className="text-xs font-semibold" style={{ color: '#C9A84C' }}>+ Añadir concepto</button>
             </div>
+
 
             {/* Cabeceras desktop */}
             <div className="hidden md:grid gap-1.5 text-xs text-gray-500 uppercase tracking-wide pb-1"
@@ -556,6 +617,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
               <div className="text-center">Dto%</div>
               <div className="text-right">Subtotal</div><div/>
             </div>
+
 
             {lineas.map((l) => {
               const busqActiva = lineaActiva === l._id && busqProd.length > 1
@@ -618,6 +680,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
               )
             })}
 
+
             {/* Móvil */}
             <div className="md:hidden space-y-3">
               {lineas.map((l) => (
@@ -642,6 +705,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
             </div>
           </div>
 
+
           {/* Notas */}
           <div>
             <label className="label">Notas / Condiciones de pago</label>
@@ -649,6 +713,7 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
               placeholder="Pago a 30 días · Transferencia bancaria..."
               value={form.notas} onChange={e => setForm(f => ({...f, notas: e.target.value}))} />
           </div>
+
 
           {/* Totales */}
           <div className="flex flex-wrap justify-end gap-5 text-sm p-4 rounded-xl" style={{ background: '#1a1814', border: '1px solid #2a2418' }}>
@@ -658,7 +723,9 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
             <span className="text-gray-400 font-semibold">TOTAL: <strong className="text-xl ml-2" style={{ color: '#C9A84C' }}>{formatEuro(total)}</strong></span>
           </div>
 
+
           {error && <div className="bg-red-900/30 border border-red-800 text-red-400 text-sm p-3 rounded-lg">⚠️ {error}</div>}
+
 
           <div className="flex justify-end gap-3 pb-2">
             <button onClick={onClose} className="btn-secondary">Cancelar</button>
@@ -672,9 +739,11 @@ function ModalEditarFactura({ factura, empresa, onClose, onSaved }) {
   )
 }
 
+
 const Th = ({ children, right, center }) => (
   <th className={`py-3 px-4 text-xs text-gray-500 font-semibold uppercase tracking-wide ${right ? 'text-right' : center ? 'text-center' : 'text-left'}`}>{children}</th>
 )
+
 
 const Skeleton = () => (
   <div className="max-w-5xl mx-auto space-y-4 animate-pulse">
