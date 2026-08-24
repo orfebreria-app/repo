@@ -20,6 +20,9 @@ export default function Stock({ session }) {
   const [loading, setLoading]   = useState(true)
   const [busqueda, setBusqueda] = useState('')
   const [filtroProveedor, setFiltroProveedor] = useState('')
+  const [busquedaProveedores, setBusquedaProveedores] = useState('')
+  const [busquedaCompras, setBusquedaCompras] = useState('')
+  const [busquedaMovimientos, setBusquedaMovimientos] = useState('')
 
   const [modalProducto, setModalProducto] = useState(null)
   const [modalProveedor, setModalProveedor] = useState(null)
@@ -60,6 +63,32 @@ export default function Stock({ session }) {
     const matchBusq = !b || p.nombre.toLowerCase().includes(b) || (p.referencia||'').toLowerCase().includes(b) || (p.categoria||'').toLowerCase().includes(b)
     const matchProv = !filtroProveedor || p.proveedor_id === filtroProveedor
     return matchBusq && matchProv
+  })
+
+  const proveedoresFiltrados = proveedores.filter(p => {
+    const b = busquedaProveedores.toLowerCase()
+    if (!b) return true
+    return p.nombre.toLowerCase().includes(b)
+      || (p.nif_cif || '').toLowerCase().includes(b)
+      || (p.email || '').toLowerCase().includes(b)
+      || (p.ciudad || '').toLowerCase().includes(b)
+  })
+
+  const comprasFiltradas = compras.filter(c => {
+    const b = busquedaCompras.toLowerCase()
+    if (!b) return true
+    return (c.proveedores?.nombre || '').toLowerCase().includes(b)
+      || (c.clientes?.nombre || '').toLowerCase().includes(b)
+      || (c.numero || '').toLowerCase().includes(b)
+  })
+
+  const movimientosFiltrados = movimientos.filter(m => {
+    const b = busquedaMovimientos.toLowerCase()
+    if (!b) return true
+    return (m.productos?.nombre || '').toLowerCase().includes(b)
+      || (m.tipo || '').toLowerCase().includes(b)
+      || (m.notas || '').toLowerCase().includes(b)
+      || (m.referencia_tipo || '').toLowerCase().includes(b)
   })
 
   const stockBajo = productos.filter(p => p.stock_actual <= p.stock_minimo && p.stock_minimo > 0)
@@ -121,7 +150,7 @@ export default function Stock({ session }) {
         ))}
       </div>
 
-      {/* ── TAB PRODUCTOS ─────────────────────────────── */}
+      {/* ── TAB PRODUCTOS ─────────────────── */}
       {tab === 0 && (
         <div className="space-y-4">
           {/* Filtros */}
@@ -296,16 +325,20 @@ export default function Stock({ session }) {
         </div>
       )}
 
-      {/* ── TAB PROVEEDORES ───────────────────────────── */}
+      {/* ── TAB PROVEEDORES ─────────────────── */}
       {tab === 1 && (
         <div className="space-y-4">
+          <div className="flex gap-3 flex-wrap">
+            <input className="input max-w-xs" placeholder="🔍 Buscar proveedor, NIF, email, ciudad..."
+              value={busquedaProveedores} onChange={e => setBusquedaProveedores(e.target.value)} />
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {proveedores.length === 0 && (
+            {proveedoresFiltrados.length === 0 && (
               <div className="text-gray-600 text-sm col-span-3 text-center py-12">
-                No hay proveedores. Crea el primero →
+                {proveedores.length === 0 ? 'No hay proveedores. Crea el primero →' : 'Ningún proveedor coincide con la búsqueda.'}
               </div>
             )}
-            {proveedores.map(prov => (
+            {proveedoresFiltrados.map(prov => (
               <div key={prov.id} className="card space-y-2">
                 <div className="flex items-start justify-between">
                   <div>
@@ -334,14 +367,18 @@ export default function Stock({ session }) {
         </div>
       )}
 
-      {/* ── TAB CATÁLOGOS ─────────────────────────────── */}
+      {/* ── TAB CATÁLOGOS ─────────────────── */}
       {tab === 2 && (
         <TabCatalogos proveedores={proveedores} empresaId={empresa.id} supabase={supabase} />
       )}
 
-      {/* ── TAB COMPRAS ───────────────────────────────── */}
+      {/* ── TAB COMPRAS ───────────────── */}
       {tab === 3 && (
         <div className="space-y-4">
+          <div className="flex gap-3 flex-wrap">
+            <input className="input max-w-xs" placeholder="🔍 Buscar proveedor o nº factura..."
+              value={busquedaCompras} onChange={e => setBusquedaCompras(e.target.value)} />
+          </div>
           {/* KPIs compras */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
@@ -369,10 +406,12 @@ export default function Stock({ session }) {
                 </tr>
               </thead>
               <tbody>
-                {compras.length === 0 && (
-                  <tr><td colSpan={6} className="text-center py-12 text-gray-600">No hay compras registradas. Crea la primera →</td></tr>
+                {comprasFiltradas.length === 0 && (
+                  <tr><td colSpan={9} className="text-center py-12 text-gray-600">
+                    {compras.length === 0 ? 'No hay compras registradas. Crea la primera →' : 'Ninguna compra coincide con la búsqueda.'}
+                  </td></tr>
                 )}
-                {compras.map(c => {
+                {comprasFiltradas.map(c => {
                   const badgeClass = {
                     pendiente: 'bg-yellow-900/40 text-yellow-400 border-yellow-800',
                     pagada:    'bg-green-900/40 text-green-400 border-green-800',
@@ -424,50 +463,58 @@ export default function Stock({ session }) {
         </div>
       )}
 
-      {/* ── TAB MOVIMIENTOS ───────────────────────────── */}
+      {/* ── TAB MOVIMIENTOS ────────────────── */}
       {tab === 4 && (
-        <div className="card p-0 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr style={{ borderBottom: '1px solid #2a2418' }}>
-                {['Fecha', 'Producto', 'Tipo', 'Cantidad', 'Stock anterior', 'Stock posterior', 'Referencia'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wide font-semibold">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {movimientos.length === 0 && (
-                <tr><td colSpan={7} className="text-center py-12 text-gray-600">Sin movimientos aún</td></tr>
-              )}
-              {movimientos.map(m => {
-                const esEntrada = m.cantidad > 0
-                const tipoLabel = {
-                  entrada: '📥 Entrada',
-                  salida_factura: '🧾 Factura',
-                  salida_ticket: '🏪 Ticket',
-                  ajuste_positivo: '⬆️ Ajuste +',
-                  ajuste_negativo: '⬇️ Ajuste -',
-                }[m.tipo] || m.tipo
-                return (
-                  <tr key={m.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
-                    <td className="px-4 py-2.5 text-gray-500 text-xs">{formatFecha(m.creado_en)}</td>
-                    <td className="px-4 py-2.5 text-white text-xs">{m.productos?.nombre || '—'}</td>
-                    <td className="px-4 py-2.5 text-xs">{tipoLabel}</td>
-                    <td className={`px-4 py-2.5 font-bold font-mono text-xs ${esEntrada ? 'text-green-400' : 'text-red-400'}`}>
-                      {esEntrada ? '+' : ''}{m.cantidad}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{m.stock_anterior}</td>
-                    <td className="px-4 py-2.5 text-gray-300 font-mono text-xs font-bold">{m.stock_posterior}</td>
-                    <td className="px-4 py-2.5 text-gray-500 text-xs">{m.notas || m.referencia_tipo || '—'}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          <div className="flex gap-3 flex-wrap">
+            <input className="input max-w-xs" placeholder="🔍 Buscar producto, tipo o nota..."
+              value={busquedaMovimientos} onChange={e => setBusquedaMovimientos(e.target.value)} />
+          </div>
+          <div className="card p-0 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ borderBottom: '1px solid #2a2418' }}>
+                  {['Fecha', 'Producto', 'Tipo', 'Cantidad', 'Stock anterior', 'Stock posterior', 'Referencia'].map(h => (
+                    <th key={h} className="text-left px-4 py-3 text-xs text-gray-500 uppercase tracking-wide font-semibold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {movimientosFiltrados.length === 0 && (
+                  <tr><td colSpan={7} className="text-center py-12 text-gray-600">
+                    {movimientos.length === 0 ? 'Sin movimientos aún' : 'Ningún movimiento coincide con la búsqueda.'}
+                  </td></tr>
+                )}
+                {movimientosFiltrados.map(m => {
+                  const esEntrada = m.cantidad > 0
+                  const tipoLabel = {
+                    entrada: '📥 Entrada',
+                    salida_factura: '🧾 Factura',
+                    salida_ticket: '🏪 Ticket',
+                    ajuste_positivo: '⬆️ Ajuste +',
+                    ajuste_negativo: '⬇️ Ajuste -',
+                  }[m.tipo] || m.tipo
+                  return (
+                    <tr key={m.id} className="border-t transition-colors hover:bg-white/5" style={{ borderColor: '#1e1c18' }}>
+                      <td className="px-4 py-2.5 text-gray-500 text-xs">{formatFecha(m.creado_en)}</td>
+                      <td className="px-4 py-2.5 text-white text-xs">{m.productos?.nombre || '—'}</td>
+                      <td className="px-4 py-2.5 text-xs">{tipoLabel}</td>
+                      <td className={`px-4 py-2.5 font-bold font-mono text-xs ${esEntrada ? 'text-green-400' : 'text-red-400'}`}>
+                        {esEntrada ? '+' : ''}{m.cantidad}
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-400 font-mono text-xs">{m.stock_anterior}</td>
+                      <td className="px-4 py-2.5 text-gray-300 font-mono text-xs font-bold">{m.stock_posterior}</td>
+                      <td className="px-4 py-2.5 text-gray-500 text-xs">{m.notas || m.referencia_tipo || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* ── MODAL COMPRA ──────────────────────────────── */}
+      {/* ── MODAL COMPRA ────────────────── */}
       {modalCompra && (
         <ModalCompra
           proveedores={proveedores}
@@ -478,7 +525,7 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── MODAL PRODUCTO ────────────────────────────── */}
+      {/* ── MODAL PRODUCTO ──────────────── */}
       {modalProducto && (
         <ModalProducto
           producto={modalProducto}
@@ -489,7 +536,7 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── MODAL PROVEEDOR ───────────────────────────── */}
+      {/* ── MODAL PROVEEDOR ────────────── */}
       {modalProveedor && (
         <ModalProveedor
           proveedor={modalProveedor}
@@ -499,7 +546,7 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── MODAL ENTRADA STOCK ───────────────────────── */}
+      {/* ── MODAL ENTRADA STOCK ─────────── */}
       {modalEntrada && (
         <ModalEntrada
           producto={modalEntrada}
@@ -509,7 +556,7 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── MODAL AJUSTE STOCK ────────────────────────── */}
+      {/* ── MODAL AJUSTE STOCK ──────────── */}
       {modalAjuste && (
         <ModalAjuste
           producto={modalAjuste}
@@ -519,7 +566,7 @@ export default function Stock({ session }) {
         />
       )}
 
-      {/* ── LIGHTBOX IMAGEN (lista) ───────────────────── */}
+      {/* ── LIGHTBOX IMAGEN (lista) ─────────── */}
       {imagenAmpliada && createPortal(
         <div className="fixed inset-0 flex items-center justify-center p-4"
           style={{ zIndex: 9999, background: 'rgba(0,0,0,0.92)' }}
@@ -539,7 +586,7 @@ export default function Stock({ session }) {
   )
 }
 
-// ── Modal Producto ──────────────────────────────────────
+// ── Modal Producto ────────────────────────
 function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   const esNuevo = !producto.id
   const [form, setForm] = useState({
@@ -751,7 +798,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   )
 }
 
-// ── Modal Proveedor ─────────────────────────────────────
+// ── Modal Proveedor ────────────────────────
 function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   const [form, setForm] = useState({
     nombre: '', nif_cif: '', email: '', telefono: '',
@@ -760,19 +807,6 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   })
   const [saving, setSaving] = useState(false)
   const f = (k) => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
-
-  const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
-  const multiplicadorProveedor = Number(proveedorSeleccionado?.multiplicador_venta || 2.5)
-
-  const recalcularPrecioVenta = (next) => {
-    if (next.precio_venta_manual) return next
-    const precio_venta = calcPrecioVentaSugerido({
-      precioCompra: next.precio_compra,
-      multiplicadorProducto: next.multiplicador_venta,
-      multiplicadorProveedor,
-    })
-    return { ...next, precio_venta }
-  }
 
   const handleSave = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
@@ -841,7 +875,7 @@ function ModalProveedor({ proveedor, empresaId, onClose, onSaved }) {
   )
 }
 
-// ── Modal Entrada Stock ─────────────────────────────────
+// ── Modal Entrada Stock ─────────────────────
 function ModalEntrada({ producto, empresaId, onClose, onSaved }) {
   const [cantidad, setCantidad] = useState('')
   const [notas, setNotas]       = useState('')
@@ -889,7 +923,7 @@ function ModalEntrada({ producto, empresaId, onClose, onSaved }) {
   )
 }
 
-// ── Modal Ajuste Stock ──────────────────────────────────
+// ── Modal Ajuste Stock ──────────────────────
 function ModalAjuste({ producto, empresaId, onClose, onSaved }) {
   const [nuevoStock, setNuevoStock] = useState(producto.stock_actual)
   const [notas, setNotas]           = useState('')
@@ -938,7 +972,7 @@ function ModalAjuste({ producto, empresaId, onClose, onSaved }) {
   )
 }
 
-// ── Modal base ──────────────────────────────────────────
+// ── Modal base ──────────────────────────
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -955,8 +989,7 @@ function Modal({ title, onClose, children }) {
   )
 }
 
-
-// ── Modal Compra / Factura Proveedor ───────────────────
+// ── Modal Compra / Factura Proveedor ───────────────
 function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
   const RECARGO = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
 
@@ -1293,9 +1326,7 @@ function ModalCompra({ proveedores, productos, empresaId, onClose, onSaved }) {
   )
 }
 
-// v-secciones
-
-// ── Tab Catálogos ──────────────────────────────────────
+// ── Tab Catálogos ───────────────────────────
 function TabCatalogos({ proveedores, empresaId, supabase }) {
   const [catalogos,       setCatalogos]       = useState([])
   const [uploading,       setUploading]       = useState(false)
