@@ -331,7 +331,7 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
 export const getFacturasProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
-    .select('*, proveedores(nombre), clientes(nombre)')
+    .select('*, proveedores(nombre), clientes(nombre), vencimientos_factura_proveedor(*)')
     .eq('empresa_id', empresaId)
     .order('fecha_factura', { ascending: false })
   return { data: data || [], error }
@@ -340,7 +340,7 @@ export const getFacturasProveedor = async (empresaId) => {
 export const getFacturaProveedor = async (id) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
-    .select('*, proveedores(*), lineas_factura_proveedor(*)')
+    .select('*, proveedores(*), lineas_factura_proveedor(*), vencimientos_factura_proveedor(*)')
     .eq('id', id)
     .single()
   return { data, error }
@@ -742,4 +742,33 @@ export const getProductosBajoMinimo = async (empresaId) => {
   if (error) return { data: [], error }
   const bajos = (data || []).filter(p => Number(p.stock_actual) <= Number(p.stock_minimo))
   return { data: bajos, error: null }
+}
+
+// ── Vencimientos de facturas de proveedor ────────────
+export const getVencimientosFacturaProveedor = async (facturaId) => {
+  const { data, error } = await supabase
+    .from('vencimientos_factura_proveedor')
+    .select('*')
+    .eq('factura_id', facturaId)
+    .order('fecha', { ascending: true })
+  return { data: data || [], error }
+}
+
+export const getProximosVencimientosProveedor = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('vencimientos_factura_proveedor')
+    .select('*, facturas_proveedor(numero, proveedor_id, proveedores(nombre))')
+    .eq('empresa_id', empresaId)
+    .order('fecha', { ascending: true })
+  return { data: data || [], error }
+}
+
+export const marcarVencimientoPagado = async (id, pagado) => {
+  const { data, error } = await supabase
+    .from('vencimientos_factura_proveedor')
+    .update({ pagado })
+    .eq('id', id)
+    .select()
+    .single()
+  return { data, error }
 }

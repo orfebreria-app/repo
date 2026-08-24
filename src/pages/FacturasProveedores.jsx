@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   getEmpresa, getProveedores, getProductos, upsertProducto,
   getFacturasProveedor, createFacturaProveedor,
   getAlbaranesPendientes, crearFacturaDesdeAlbaranes,
   updateEstadoFacturaProveedor, deleteFacturaProveedor,
+  marcarVencimientoPagado,
   formatEuro, formatFecha,
 } from '../lib/supabase'
 import { tasaRE } from '../lib/calculos'
 import { format } from 'date-fns'
+
 
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
@@ -20,7 +22,17 @@ const lineaVacia = () => ({
   referencia: '',
 })
 
+
 const calcBase = (l) => +(Number(l.cantidad || 0) * Number(l.precio_unitario || 0)).toFixed(2)
+
+
+const plazoVacio = () => ({
+  _id: Math.random().toString(36).slice(2),
+  fecha: '',
+  importe: '',
+  notas: '',
+})
+
 
 const emptyForm = () => ({
   proveedor_id: '',
@@ -29,7 +41,14 @@ const emptyForm = () => ({
   fecha_vencimiento: '',
   notas: '',
   lineas: [lineaVacia()],
+  plazos: [],
 })
+
+
+const ESTADOS = ['pendiente', 'pagada', 'vencida', 'cancelada']
+const hoy = new Date()
+const diasHasta = (fecha) => Math.ceil((new Date(fecha) - hoy) / (1000 * 60 * 60 * 24))
+
 
 export default function FacturasProveedores({ session }) {
   const [empresa, setEmpresa]         = useState(null)
@@ -43,10 +62,14 @@ export default function FacturasProveedores({ session }) {
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState('')
   const [filtroEstado, setFiltroEstado] = useState('')
+  const [expandidaId, setExpandidaId] = useState(null)
+  const [usarPlazos, setUsarPlazos]   = useState(false)
+
 
   const [albaranesPendientes, setAlbaranesPendientes] = useState([])
   const [seleccionados, setSeleccionados]             = useState([])
   const [cargandoAlbaranes, setCargandoAlbaranes]     = useState(false)
+
 
   const cargar = async (emp) => {
     const [{ data: facts }, { data: provs }, { data: prods }] = await Promise.all([
@@ -59,6 +82,7 @@ export default function FacturasProveedores({ session }) {
     setProductos(prods)
   }
 
+
   useEffect(() => {
     const init = async () => {
       const { data: emp } = await getEmpresa(session.user.id)
@@ -69,11 +93,14 @@ export default function FacturasProveedores({ session }) {
     init()
   }, [session])
 
+
   const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
   const proveedorConRE = !!proveedorSeleccionado?.recargo_equivalencia
 
-  const openNew = () => { setForm(emptyForm()); setError(''); setModo('albaranes'); setSeleccionados([]); setAlbaranesPendientes([]); setModal(true) }
+
+  const openNew = () => { setForm(emptyForm()); setError(''); setModo('albaranes'); setSeleccionados([]); setAlbaranesPendientes([]); setUsarPlazos(false); setModal(true) }
   const closeModal = () => setModal(false)
+
 
   const cambiarProveedor = async (proveedorId) => {
     setForm(f => ({ ...f, proveedor_id: proveedorId }))
@@ -88,6 +115,7 @@ export default function FacturasProveedores({ session }) {
     }
   }
 
+
   const cambiarModo = async (nuevoModo) => {
     setModo(nuevoModo)
     setSeleccionados([])
@@ -101,9 +129,11 @@ export default function FacturasProveedores({ session }) {
     }
   }
 
+
   const toggleAlbaran = (id) => {
     setSeleccionados(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   }
+
 
   // Cada vez que cambia la selección de albaranes, se regeneran las
   // líneas editables de la factura a partir de sus líneas — el
@@ -114,7 +144,7 @@ export default function FacturasProveedores({ session }) {
     const lineasDeAlbaranes = albaranesPendientes
       .filter(a => seleccionados.includes(a.id))
       .flatMap(a => (a.lineas_albaran_proveedor || []).map(l => ({
-        _id: Math.random().toString(36).slice(2),
+        _id: l.id,
         descripcion: l.descripcion,
         cantidad: l.cantidad,
         precio_unitario: l.precio_unitario,
@@ -123,9 +153,10 @@ export default function FacturasProveedores({ session }) {
         producto_id: l.producto_id,
         referencia: l.referencia || '',
       })))
-    setForm(f => ({ ...f, lineas: lineasDeAlbaranes.length ? lineasDeAlbaranes : [lineaVacia()] }))
+    setForm(f => ({ ...f, lineas: lineasDeAlbaranes }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seleccionados])
+  }, [seleccionados, modo])
+
 
   const setLinea = (id, campo, valor) => {
     setForm(f => ({ ...f, lineas: f.lineas.map(l => l._id === id ? { ...l, [campo]: valor } : l) }))
@@ -133,15 +164,29 @@ export default function FacturasProveedores({ session }) {
   const addLinea = () => setForm(f => ({ ...f, lineas: [...f.lineas, lineaVacia()] }))
   const removeLinea = (id) => setForm(f => ({ ...f, lineas: f.lineas.filter(l => l._id !== id) }))
 
+
+  const setPlazo = (id, campo, valor) => {
+    setForm(f => ({ ...f, plazos: f.plazos.map(p => p._id === id ? { ...p, [campo]: valor } : p) }))
+  }
+  const addPlazo = () => setForm(f => ({ ...f, plazos: [...f.plazos, plazoVacio()] }))
+  const removePlazo = (id) => setForm(f => ({ ...f, plazos: f.plazos.filter(p => p._id !== id) }))
+
+
   const recargoLinea = (l) => {
     const tasa = l.recargo_tasa === '' || l.recargo_tasa === undefined ? tasaRE(l.iva_tasa) : Number(l.recargo_tasa)
     return +(calcBase(l) * tasa / 100).toFixed(2)
   }
 
+
   const subtotal    = form.lineas.reduce((s, l) => s + calcBase(l), 0)
   const ivaTotal     = form.lineas.reduce((s, l) => s + +(calcBase(l) * (Number(l.iva_tasa || 0) / 100)).toFixed(2), 0)
   const recargoTotal = proveedorConRE ? form.lineas.reduce((s, l) => s + recargoLinea(l), 0) : 0
   const total        = subtotal + ivaTotal + recargoTotal
+
+
+  const sumaPlazos = form.plazos.reduce((s, p) => s + (Number(p.importe) || 0), 0)
+  const diferenciaPlazos = +(total - sumaPlazos).toFixed(2)
+
 
   const resolverLineasConProducto = async (lineasValidas) => {
     const lineasConProducto = []
@@ -171,15 +216,23 @@ export default function FacturasProveedores({ session }) {
     return lineasConProducto
   }
 
+
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.proveedor_id) return setError('Elige un proveedor')
+
 
     const lineasValidas = form.lineas.filter(l => l.descripcion.trim())
     if (!lineasValidas.length) return setError('Añade al menos una línea con descripción')
     if (modo === 'albaranes' && !seleccionados.length) return setError('Selecciona al menos un albarán')
 
+
+    const plazosValidos = usarPlazos ? form.plazos.filter(p => p.fecha && Number(p.importe) > 0) : []
+    if (usarPlazos && form.plazos.length && !plazosValidos.length) return setError('Completa fecha e importe de al menos un plazo, o desactiva el pago en varios plazos')
+
+
     setSaving(true)
+
 
     const factura = {
       empresa_id: empresa.id,
@@ -194,6 +247,7 @@ export default function FacturasProveedores({ session }) {
       total: +total.toFixed(2),
     }
 
+
     try {
       const lineasConProducto = await resolverLineasConProducto(lineasValidas)
       const lineas = lineasConProducto.map(l => ({
@@ -207,11 +261,12 @@ export default function FacturasProveedores({ session }) {
         producto_id: l.producto_id || null,
       }))
 
+
       if (modo === 'albaranes') {
         const { error: err } = await crearFacturaDesdeAlbaranes(factura, lineas, seleccionados)
         if (err) throw new Error(err.message)
       } else {
-        const { error: err } = await createFacturaProveedor(factura, lineas)
+        const { error: err } = await createFacturaProveedor(factura, lineas, plazosValidos)
         if (err) throw new Error(err.message)
       }
     } catch (err) {
@@ -220,29 +275,50 @@ export default function FacturasProveedores({ session }) {
       return
     }
 
+
     await cargar(empresa)
     setSaving(false)
     closeModal()
   }
 
+
+  const cambiarEstado = async (id, estado) => {
+    await updateEstadoFacturaProveedor(id, estado)
+    await cargar(empresa)
+  }
+
+
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar esta factura de proveedor?')) return
+    if (!confirm('¿Eliminar esta factura de proveedor? Esto no revierte el stock que sumó al crearla.')) return
     await deleteFacturaProveedor(id)
     await cargar(empresa)
   }
 
-  const filtrados = filtroEstado ? facturas.filter(f => f.estado === filtroEstado) : facturas
+
+  const toggleExpandida = (id) => setExpandidaId(prev => prev === id ? null : id)
+
+
+  const togglePagadoPlazo = async (vencimientoId, pagadoActual) => {
+    await marcarVencimientoPagado(vencimientoId, !pagadoActual)
+    await cargar(empresa)
+  }
+
+
+  const filtradas = filtroEstado ? facturas.filter(f => f.estado === filtroEstado) : facturas
+
 
   if (loading) return <Skeleton />
+
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold text-white">Facturas de proveedor</h1>
         <button onClick={openNew} className="btn-primary flex items-center gap-2" disabled={!proveedores.length}>
-          <span>+</span> Nueva factura
+          <span>+</span> Nueva factura de compra
         </button>
       </div>
+
 
       {!proveedores.length && (
         <div className="card text-sm text-gray-400">
@@ -250,8 +326,17 @@ export default function FacturasProveedores({ session }) {
         </div>
       )}
 
+
+      <div className="flex gap-2 flex-wrap">
+        <FiltroBtn label="Todas" activo={!filtroEstado} onClick={() => setFiltroEstado('')} />
+        {ESTADOS.map(e => (
+          <FiltroBtn key={e} label={e} activo={filtroEstado === e} onClick={() => setFiltroEstado(e)} />
+        ))}
+      </div>
+
+
       <div className="card p-0 overflow-hidden">
-        {filtrados.length === 0 ? (
+        {filtradas.length === 0 ? (
           <div className="text-center py-16 text-gray-600">
             <div className="text-4xl mb-3">📥</div>
             <p className="text-sm">Sin facturas de proveedor todavía.</p>
@@ -260,30 +345,79 @@ export default function FacturasProveedores({ session }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
-                <Th>Proveedor</Th><Th>Nº</Th><Th>Fecha</Th><Th>Estado</Th><Th className="text-right">Total</Th><Th />
+                <Th>Proveedor</Th><Th>Nº</Th><Th>Fecha</Th><Th>Vencimiento</Th><Th>Estado</Th><Th className="text-right">Total</Th><Th />
               </tr>
             </thead>
             <tbody>
-              {filtrados.map(f => (
-                <tr key={f.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
-                  <td className="py-3 px-4 font-medium text-white">{f.proveedores?.nombre || '—'}</td>
-                  <td className="py-3 px-4 text-gray-400 font-mono text-xs">{f.numero || '—'}</td>
-                  <td className="py-3 px-4 text-gray-400 text-xs">{formatFecha(f.fecha_factura)}</td>
-                  <td className="py-3 px-4">
-                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${f.estado === 'pagada' ? 'badge-pagada' : 'badge-borrador'}`}>
-                      {f.estado}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{formatEuro(f.total)}</td>
-                  <td className="py-3 px-4 text-right">
-                    <button onClick={() => handleDelete(f.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
-                  </td>
-                </tr>
-              ))}
+              {filtradas.map(f => {
+                const plazos = f.vencimientos_factura_proveedor || []
+                const tienePlazos = plazos.length > 0
+                const pendientesPlazos = plazos.filter(p => !p.pagado)
+                const proximoPlazo = pendientesPlazos.slice().sort((a, b) => new Date(a.fecha) - new Date(b.fecha))[0]
+                return (
+                <React.Fragment key={f.id}>
+                  <tr className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                    <td className="py-3 px-4 font-medium text-white">{f.proveedores?.nombre || '—'}</td>
+                    <td className="py-3 px-4 text-gray-400 font-mono text-xs">{f.numero || '—'}</td>
+                    <td className="py-3 px-4 text-gray-400 text-xs">{formatFecha(f.fecha_factura)}</td>
+                    <td className="py-3 px-4 text-xs">
+                      {tienePlazos ? (
+                        <button onClick={() => toggleExpandida(f.id)} className="text-left hover:underline">
+                          {proximoPlazo ? (
+                            <span className={diasHasta(proximoPlazo.fecha) < 0 ? 'text-red-400 font-semibold' : diasHasta(proximoPlazo.fecha) <= 7 ? 'text-orange-400 font-semibold' : 'text-gray-400'}>
+                              {formatFecha(proximoPlazo.fecha)} · {pendientesPlazos.length}/{plazos.length} plazos
+                            </span>
+                          ) : (
+                            <span className="text-green-400">Todos los plazos pagados</span>
+                          )}
+                        </button>
+                      ) : f.fecha_vencimiento ? (
+                        <span className="text-gray-400">{formatFecha(f.fecha_vencimiento)}</span>
+                      ) : '—'}
+                    </td>
+                    <td className="py-3 px-4">
+                      <select
+                        value={f.estado}
+                        onChange={e => cambiarEstado(f.id, e.target.value)}
+                        className={`text-xs px-2 py-1 rounded-full font-medium border-0 cursor-pointer badge-${f.estado === 'pagada' ? 'pagada' : f.estado === 'vencida' ? 'vencida' : f.estado === 'cancelada' ? 'cancelada' : 'borrador'}`}
+                      >
+                        {ESTADOS.map(e => <option key={e} value={e}>{e}</option>)}
+                      </select>
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{formatEuro(f.total)}</td>
+                    <td className="py-3 px-4 text-right">
+                      <button onClick={() => handleDelete(f.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
+                    </td>
+                  </tr>
+                  {expandidaId === f.id && tienePlazos && (
+                    <tr className="bg-gray-900/60 border-b border-gray-800/50">
+                      <td colSpan={7} className="py-3 px-4">
+                        <div className="text-xs text-gray-500 uppercase tracking-wide font-semibold mb-2">Plazos de pago</div>
+                        <div className="space-y-1.5">
+                          {plazos.slice().sort((a, b) => new Date(a.fecha) - new Date(b.fecha)).map(p => (
+                            <div key={p.id} className="flex items-center justify-between gap-3 text-sm bg-gray-800/40 rounded-lg px-3 py-2">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input type="checkbox" checked={!!p.pagado} onChange={() => togglePagadoPlazo(p.id, p.pagado)} />
+                                <span className={p.pagado ? 'text-gray-500 line-through' : diasHasta(p.fecha) < 0 ? 'text-red-400 font-medium' : 'text-gray-300'}>
+                                  {formatFecha(p.fecha)}
+                                </span>
+                              </label>
+                              <span className="text-gray-500 flex-1 text-xs truncate">{p.notas || ''}</span>
+                              <span className="font-mono text-white">{formatEuro(p.importe)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+                )
+              })}
             </tbody>
           </table>
         )}
       </div>
+
 
       {modal && (
         <Modal title="Nueva factura de proveedor" onClose={closeModal}>
@@ -292,6 +426,7 @@ export default function FacturasProveedores({ session }) {
               <ModoBtn label="Desde albaranes recibidos" activo={modo === 'albaranes'} onClick={() => cambiarModo('albaranes')} />
               <ModoBtn label="Manual (sin albarán)" activo={modo === 'manual'} onClick={() => cambiarModo('manual')} />
             </div>
+
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -302,24 +437,26 @@ export default function FacturasProveedores({ session }) {
                 </select>
               </div>
               <div>
-                <label className="label">Nº de factura</label>
+                <label className="label">Nº de factura del proveedor</label>
                 <input className="input" value={form.numero} onChange={e => setForm({...form, numero: e.target.value})} />
               </div>
               <div>
-                <label className="label">Fecha</label>
+                <label className="label">Fecha factura</label>
                 <input className="input" type="date" value={form.fecha_factura} onChange={e => setForm({...form, fecha_factura: e.target.value})} />
               </div>
               <div>
                 <label className="label">Fecha de vencimiento</label>
-                <input className="input" type="date" value={form.fecha_vencimiento} onChange={e => setForm({...form, fecha_vencimiento: e.target.value})} />
+                <input className="input" type="date" value={form.fecha_vencimiento} onChange={e => setForm({...form, fecha_vencimiento: e.target.value})} disabled={usarPlazos} />
               </div>
             </div>
+
 
             {proveedorConRE && (
               <p className="text-xs text-brand-500 bg-brand-500/10 border border-brand-500/30 rounded-lg px-3 py-2">
                 Este proveedor aplica recargo de equivalencia — indica el que te pongan en cada línea (o deja el valor por defecto).
               </p>
             )}
+
 
             {modo === 'albaranes' && (
               <div>
@@ -345,6 +482,7 @@ export default function FacturasProveedores({ session }) {
                 )}
               </div>
             )}
+
 
             {(modo === 'manual' || seleccionados.length > 0) && (
               <div>
@@ -406,10 +544,48 @@ export default function FacturasProveedores({ session }) {
               </div>
             )}
 
+
+            {modo === 'manual' && (
+              <div className="border-t border-gray-800 pt-3">
+                <label className="flex items-center gap-2 cursor-pointer mb-2">
+                  <input
+                    type="checkbox"
+                    checked={usarPlazos}
+                    onChange={e => {
+                      const activo = e.target.checked
+                      setUsarPlazos(activo)
+                      if (activo && !form.plazos.length) setForm(f => ({ ...f, plazos: [plazoVacio()] }))
+                    }}
+                  />
+                  <span className="label mb-0">Pagar en varios plazos</span>
+                </label>
+
+
+                {usarPlazos && (
+                  <div className="space-y-2">
+                    {form.plazos.map(p => (
+                      <div key={p._id} className="grid grid-cols-12 gap-2 items-center">
+                        <input className="input col-span-3 text-xs" type="date" value={p.fecha} onChange={e => setPlazo(p._id, 'fecha', e.target.value)} />
+                        <input className="input col-span-3 text-xs" type="number" step="0.01" min="0" placeholder="Importe" value={p.importe} onChange={e => setPlazo(p._id, 'importe', e.target.value)} />
+                        <input className="input col-span-5 text-xs" placeholder="Notas (opcional)" value={p.notas} onChange={e => setPlazo(p._id, 'notas', e.target.value)} />
+                        <button type="button" onClick={() => removePlazo(p._id)} className="col-span-1 text-gray-600 hover:text-red-400 text-xs">✕</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={addPlazo} className="text-xs text-brand-500 hover:underline">+ Añadir plazo</button>
+                    <p className={`text-xs mt-1 ${diferenciaPlazos === 0 ? 'text-gray-600' : 'text-orange-400'}`}>
+                      Suma de plazos: {formatEuro(sumaPlazos)} {diferenciaPlazos !== 0 && `(diferencia con el total: ${formatEuro(diferenciaPlazos)})`}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+
             <div>
               <label className="label">Notas</label>
               <textarea className="input h-16 resize-none text-sm" value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} />
             </div>
+
 
             <div className="flex justify-end gap-6 text-sm border-t border-gray-800 pt-3">
               <div>Subtotal <span className="font-mono text-gray-300 ml-2">{formatEuro(subtotal)}</span></div>
@@ -417,6 +593,7 @@ export default function FacturasProveedores({ session }) {
               {proveedorConRE && <div>Recargo <span className="font-mono text-gray-300 ml-2">{formatEuro(recargoTotal)}</span></div>}
               <div className="font-bold">Total <span className="font-mono text-white ml-2">{formatEuro(total)}</span></div>
             </div>
+
 
             {error && <p className="text-red-400 text-sm">{error}</p>}
             <div className="flex justify-end gap-3 pt-1">
@@ -430,15 +607,18 @@ export default function FacturasProveedores({ session }) {
   )
 }
 
+
 const Th = ({ children, className = '' }) => (
   <th className={`text-left py-3 px-4 text-xs text-gray-500 font-semibold uppercase tracking-wide ${className}`}>{children}</th>
 )
 
+
 const FiltroBtn = ({ label, activo, onClick }) => (
-  <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${activo ? 'bg-brand-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+  <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-full font-medium capitalize transition-colors ${activo ? 'bg-brand-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
     {label}
   </button>
 )
+
 
 const ModoBtn = ({ label, activo, onClick }) => (
   <button type="button" onClick={onClick} className={`text-xs px-3 py-2 rounded-lg font-medium transition-colors flex-1 ${activo ? 'bg-brand-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
@@ -446,11 +626,12 @@ const ModoBtn = ({ label, activo, onClick }) => (
   </button>
 )
 
+
 function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-4xl">
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-3xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
@@ -460,6 +641,7 @@ function Modal({ title, onClose, children }) {
     </div>
   )
 }
+
 
 const Skeleton = () => (
   <div className="max-w-5xl mx-auto space-y-4 animate-pulse">
