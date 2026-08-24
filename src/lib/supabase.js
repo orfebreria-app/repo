@@ -10,7 +10,6 @@ if (!supabaseUrl || !supabaseKey) {
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
 // ── Recargo de Equivalencia ─────────────────────────
-// Devuelve la tasa RE correspondiente al IVA
 export const tasaRE = (ivaTasa) => {
   const t = Number(ivaTasa)
   if (t === 21) return 5.2
@@ -82,7 +81,6 @@ export const getFacturas = async (empresaId) => {
     .select(`*, clientes(nombre, email)`)
     .eq('empresa_id', empresaId)
     .order('fecha_emision', { ascending: false })
-  // Ordenar por número extraído del folio (FAC-0012 → 12)
   const sorted = (data || []).sort((a, b) => {
     const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
     const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
@@ -131,8 +129,6 @@ export const createFactura = async (factura, conceptos) => {
   return { data: fact, error: null }
 }
 
-// Reserva el siguiente folio de forma atómica (sin riesgo de duplicados
-// por dos facturas creadas casi a la vez).
 export const getSiguienteFolioAtomico = async (empresaId) => {
   if (!empresaId) return { folio: null, error: new Error('Falta el id de empresa para reservar el folio') }
 
@@ -144,7 +140,6 @@ export const getSiguienteFolioAtomico = async (empresaId) => {
     }
   }
 
-  // Fallback: si la RPC falla, calcular desde el contador de empresas.
   const { data: empresa, error: errEmpresa } = await supabase
     .from('empresas')
     .select('id, serie, siguiente_folio')
@@ -264,13 +259,11 @@ export const getMovimientos = async (empresaId, productoId = null) => {
   return { data: data || [], error }
 }
 
-// Descuenta stock de una lista de líneas y registra movimientos
 export const descontarStockVenta = async (empresaId, lineas, referenciaId, referenciaTipo) => {
   const lineasConProducto = lineas.filter(l => l.producto_id)
   if (!lineasConProducto.length) return { error: null }
 
   for (const linea of lineasConProducto) {
-    // Obtener stock actual
     const { data: prod } = await supabase
       .from('productos')
       .select('stock_actual')
@@ -282,13 +275,11 @@ export const descontarStockVenta = async (empresaId, lineas, referenciaId, refer
     const cantidad = Number(linea.cantidad)
     const posterior = anterior - cantidad
 
-    // Actualizar stock
     await supabase
       .from('productos')
       .update({ stock_actual: posterior })
       .eq('id', linea.producto_id)
 
-    // Registrar movimiento
     await supabase.from('movimientos_stock').insert({
       empresa_id:      empresaId,
       producto_id:     linea.producto_id,
@@ -444,19 +435,17 @@ export const calcRecargoLinea = (base, ivaTasa) => {
 
 // ── Editar factura completa ─────────────────
 export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conceptosNuevos, conceptosOriginales) => {
-  // 1. Actualizar cabecera
   const { error: errCab } = await supabase
     .from('facturas')
     .update(cabecera)
     .eq('id', facturaId)
   if (errCab) return { error: errCab }
 
-  // 2. Revertir stock de los conceptos originales con producto
   for (const c of (conceptosOriginales || []).filter(c => c.producto_id)) {
     const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
     if (!prod) continue
     const anterior  = Number(prod.stock_actual)
-    const posterior = anterior + Number(c.cantidad) // devolver lo que se descontó
+    const posterior = anterior + Number(c.cantidad)
     await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
     await supabase.from('movimientos_stock').insert({
       empresa_id: empresaId, producto_id: c.producto_id,
@@ -467,13 +456,11 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
     })
   }
 
-  // 3. Borrar conceptos viejos e insertar nuevos
   await supabase.from('conceptos_factura').delete().eq('factura_id', facturaId)
   const items = conceptosNuevos.map((c, i) => ({ ...c, factura_id: facturaId, orden: i }))
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { error: errConc }
 
-  // 4. Descontar stock de los nuevos conceptos con producto
   for (const c of conceptosNuevos.filter(c => c.producto_id)) {
     const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
     if (!prod) continue
@@ -496,7 +483,7 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
 export const getAlbaranesProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('albaranes_proveedor')
-    .select('*, proveedores(nombre)')
+    .select('*, proveedores(nombre), lineas_albaran_proveedor(*)')
     .eq('empresa_id', empresaId)
     .order('fecha_albaran', { ascending: false })
   return { data: data || [], error }
@@ -539,6 +526,76 @@ export const createAlbaranProveedor = async (albaran, lineas) => {
   return { data: alb, error: null }
 }
 
+export const updateAlbaranProveedor = async (albaranId, cabecera, lineasNuevas, lineasOriginales) => {
+  const idsOriginalesUsados = new Set()
+
+  for (const nueva of lineasNuevas) {
+    if (!nueva.producto_id) continue
+    const original = nueva._id_original
+      ? lineasOriginales.find(o => o.id === nueva._id_original)
+      : null
+    if (original) idsOriginalesUsados.add(original.id)
+
+    const cantidadNueva = Number(nueva.cantidad) || 0
+    const cantidadAntigua = original ? Number(original.cantidad) || 0 : 0
+    const delta = cantidadNueva - cantidadAntigua
+
+    if (delta !== 0) {
+      await supabase.rpc('mover_stock', {
+        p_producto_id: nueva.producto_id,
+        p_delta: delta,
+        p_tipo: delta > 0 ? 'entrada' : 'ajuste_negativo',
+        p_referencia_id: albaranId,
+        p_referencia_tipo: 'albaran_edicion',
+        p_notas: `Edición de albarán ${cabecera.numero || albaranId.slice(0, 8)}`,
+      })
+    }
+  }
+
+  for (const original of lineasOriginales) {
+    if (!original.producto_id) continue
+    if (idsOriginalesUsados.has(original.id)) continue
+    const cantidadAntigua = Number(original.cantidad) || 0
+    if (cantidadAntigua === 0) continue
+
+    await supabase.rpc('mover_stock', {
+      p_producto_id: original.producto_id,
+      p_delta: -cantidadAntigua,
+      p_tipo: 'ajuste_negativo',
+      p_referencia_id: albaranId,
+      p_referencia_tipo: 'albaran_edicion',
+      p_notas: `Línea eliminada al editar albarán ${cabecera.numero || albaranId.slice(0, 8)}`,
+    })
+  }
+
+  const { error: errDel } = await supabase.from('lineas_albaran_proveedor').delete().eq('albaran_id', albaranId)
+  if (errDel) return { error: errDel }
+
+  const items = lineasNuevas.map((l, i) => ({
+    albaran_id: albaranId,
+    descripcion: l.descripcion,
+    referencia: l.referencia || null,
+    cantidad: Number(l.cantidad) || 0,
+    precio_unitario: Number(l.precio_unitario) || 0,
+    iva_tasa: Number(l.iva_tasa) || 0,
+    recargo_tasa: l.recargo_tasa || 0,
+    recargo_importe: l.recargo_importe || 0,
+    subtotal: l.subtotal || 0,
+    producto_id: l.producto_id || null,
+    orden: i,
+  }))
+  const { error: errIns } = await supabase.from('lineas_albaran_proveedor').insert(items)
+  if (errIns) return { error: errIns }
+
+  const { error: errCab } = await supabase
+    .from('albaranes_proveedor')
+    .update(cabecera)
+    .eq('id', albaranId)
+  if (errCab) return { error: errCab }
+
+  return { error: null }
+}
+
 export const deleteAlbaranProveedor = async (id) => {
   const { error } = await supabase.from('albaranes_proveedor').delete().eq('id', id)
   return { error }
@@ -565,7 +622,7 @@ export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) =>
   return { data: fp, error: null }
 }
 
-// ── Informe de IVA ───────────────────────
+// ── Informe de IVA ─────────────────────
 export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
   const { data, error } = await supabase
     .from('facturas')

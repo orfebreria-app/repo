@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   getEmpresa, getProveedores, getProductos, upsertProducto,
-  getAlbaranesProveedor, createAlbaranProveedor, deleteAlbaranProveedor,
+  getAlbaranesProveedor, createAlbaranProveedor, updateAlbaranProveedor, deleteAlbaranProveedor,
   formatEuro, formatFecha,
 } from '../lib/supabase'
 import { tasaRE } from '../lib/calculos'
@@ -9,6 +9,7 @@ import { format } from 'date-fns'
 
 const lineaVacia = () => ({
   _id: Math.random().toString(36).slice(2),
+  _id_original: null,
   descripcion: '',
   cantidad: 1,
   precio_unitario: '',
@@ -21,6 +22,7 @@ const lineaVacia = () => ({
 const calcBase = (l) => +(Number(l.cantidad || 0) * Number(l.precio_unitario || 0)).toFixed(2)
 
 const emptyForm = () => ({
+  id: null,
   proveedor_id: '',
   numero: '',
   fecha_albaran: format(new Date(), 'yyyy-MM-dd'),
@@ -35,6 +37,8 @@ export default function AlbaranesProveedor({ session }) {
   const [albaranes, setAlbaranes]     = useState([])
   const [loading, setLoading]         = useState(true)
   const [modal, setModal]             = useState(false)
+  const [editandoId, setEditandoId]   = useState(null)
+  const [lineasOriginales, setLineasOriginales] = useState([])
   const [form, setForm]               = useState(emptyForm())
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState('')
@@ -64,7 +68,36 @@ export default function AlbaranesProveedor({ session }) {
   const proveedorSeleccionado = proveedores.find(p => p.id === form.proveedor_id)
   const proveedorConRE = !!proveedorSeleccionado?.recargo_equivalencia
 
-  const openNew = () => { setForm(emptyForm()); setError(''); setModal(true) }
+  const openNew = () => { setForm(emptyForm()); setEditandoId(null); setLineasOriginales([]); setError(''); setModal(true) }
+
+  const openEdit = (albaran) => {
+    const lineasOrig = albaran.lineas_albaran_proveedor || []
+    setLineasOriginales(lineasOrig)
+    setForm({
+      id: albaran.id,
+      proveedor_id: albaran.proveedor_id,
+      numero: albaran.numero || '',
+      fecha_albaran: albaran.fecha_albaran,
+      notas: albaran.notas || '',
+      lineas: lineasOrig.length
+        ? lineasOrig.map(l => ({
+            _id: Math.random().toString(36).slice(2),
+            _id_original: l.id,
+            descripcion: l.descripcion,
+            cantidad: l.cantidad,
+            precio_unitario: l.precio_unitario,
+            iva_tasa: l.iva_tasa,
+            recargo_tasa: l.recargo_tasa || '',
+            producto_id: l.producto_id,
+            referencia: l.referencia || '',
+          }))
+        : [lineaVacia()],
+    })
+    setEditandoId(albaran.id)
+    setError('')
+    setModal(true)
+  }
+
   const closeModal = () => setModal(false)
 
   const setLinea = (id, campo, valor) => {
@@ -86,8 +119,6 @@ export default function AlbaranesProveedor({ session }) {
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.proveedor_id) return setError('Elige un proveedor')
-    // Solo hace falta descripción — precio e IVA pueden rellenarse
-    // más tarde, al llegar la factura (muchos albaranes no traen precio).
     const lineasValidas = form.lineas.filter(l => l.descripcion.trim())
     if (!lineasValidas.length) return setError('Añade al menos una línea con descripción')
 
@@ -118,8 +149,7 @@ export default function AlbaranesProveedor({ session }) {
       lineasConProducto.push({ ...l, producto_id: productoId })
     }
 
-    const albaran = {
-      empresa_id: empresa.id,
+    const cabecera = {
       proveedor_id: form.proveedor_id,
       numero: form.numero || null,
       fecha_albaran: form.fecha_albaran,
@@ -130,6 +160,7 @@ export default function AlbaranesProveedor({ session }) {
       total: +total.toFixed(2),
     }
     const lineas = lineasConProducto.map(l => ({
+      _id_original: l._id_original || null,
       descripcion: l.descripcion,
       referencia: l.referencia || null,
       cantidad: Number(l.cantidad) || 0,
@@ -141,8 +172,15 @@ export default function AlbaranesProveedor({ session }) {
       producto_id: l.producto_id || null,
     }))
 
-    const { error: err } = await createAlbaranProveedor(albaran, lineas)
-    if (err) { setError(err.message); setSaving(false); return }
+    if (editandoId) {
+      const { error: err } = await updateAlbaranProveedor(editandoId, { empresa_id: empresa.id, ...cabecera }, lineas, lineasOriginales)
+      if (err) { setError(err.message); setSaving(false); return }
+    } else {
+      const albaran = { empresa_id: empresa.id, ...cabecera }
+      const { error: err } = await createAlbaranProveedor(albaran, lineas)
+      if (err) { setError(err.message); setSaving(false); return }
+    }
+
     await cargar(empresa)
     setSaving(false)
     closeModal()
@@ -194,7 +232,7 @@ export default function AlbaranesProveedor({ session }) {
             </thead>
             <tbody>
               {filtrados.map(a => (
-                <tr key={a.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
+                <tr key={a.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors cursor-pointer" onClick={() => openEdit(a)}>
                   <td className="py-3 px-4 font-medium text-white">{a.proveedores?.nombre || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 font-mono text-xs">{a.numero || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{formatFecha(a.fecha_albaran)}</td>
@@ -204,7 +242,8 @@ export default function AlbaranesProveedor({ session }) {
                     </span>
                   </td>
                   <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{a.total ? formatEuro(a.total) : '—'}</td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-right" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => openEdit(a)} className="text-xs text-brand-500 hover:underline px-2 py-1 mr-1">Editar</button>
                     {a.estado === 'pendiente' && (
                       <button onClick={() => handleDelete(a.id)} className="text-xs text-gray-600 hover:text-red-400 transition-colors px-2 py-1 rounded hover:bg-gray-800">Eliminar</button>
                     )}
@@ -217,7 +256,7 @@ export default function AlbaranesProveedor({ session }) {
       </div>
 
       {modal && (
-        <Modal title="Nuevo albarán de proveedor" onClose={closeModal}>
+        <Modal title={editandoId ? 'Editar albarán de proveedor' : 'Nuevo albarán de proveedor'} onClose={closeModal}>
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -240,6 +279,12 @@ export default function AlbaranesProveedor({ session }) {
             {proveedorConRE && (
               <p className="text-xs text-brand-500 bg-brand-500/10 border border-brand-500/30 rounded-lg px-3 py-2">
                 Este proveedor aplica recargo de equivalencia — indica el que te pongan en cada línea (o deja el valor por defecto).
+              </p>
+            )}
+
+            {editandoId && (
+              <p className="text-xs text-yellow-400 bg-yellow-400/10 border border-yellow-400/30 rounded-lg px-3 py-2">
+                Si cambias las cantidades, el stock de los artículos se ajustará automáticamente por la diferencia al guardar.
               </p>
             )}
 
@@ -297,7 +342,7 @@ export default function AlbaranesProveedor({ session }) {
               </datalist>
               <p className="text-xs text-gray-600 mt-2">
                 Solo la descripción es obligatoria — puedes dejar precio e IVA en blanco si el albarán no los trae, y rellenarlos luego al facturar.
-                El stock se suma al guardar (la mercancía ya ha llegado). La factura se genera después seleccionando este albarán.
+                El stock se ajusta automáticamente al guardar (entrada al crear, diferencia al editar).
               </p>
             </div>
 
@@ -316,7 +361,7 @@ export default function AlbaranesProveedor({ session }) {
             {error && <p className="text-red-400 text-sm">{error}</p>}
             <div className="flex justify-end gap-3 pt-1">
               <button type="button" onClick={closeModal} className="btn-secondary">Cancelar</button>
-              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+              <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando...' : editandoId ? 'Guardar cambios' : 'Guardar'}</button>
             </div>
           </form>
         </Modal>
