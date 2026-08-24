@@ -730,7 +730,7 @@ export const aplicarPreciosMasivos = async ({ productosIds, coeficiente, forzarC
   return { resultados, error: errores.length > 0 ? errores : null }
 }
 
-// ── Alertas de stock ──────────────────────
+// ── Alertas de stock ────────────────────────────────────────
 export const getProductosBajoMinimo = async (empresaId) => {
   const { data, error } = await supabase
     .from('productos')
@@ -744,7 +744,7 @@ export const getProductosBajoMinimo = async (empresaId) => {
   return { data: bajos, error: null }
 }
 
-// ── Vencimientos de facturas de proveedor ────────────
+// ── Vencimientos de facturas de proveedor ────────────────────
 export const getVencimientosFacturaProveedor = async (facturaId) => {
   const { data, error } = await supabase
     .from('vencimientos_factura_proveedor')
@@ -771,4 +771,37 @@ export const marcarVencimientoPagado = async (id, pagado) => {
     .select()
     .single()
   return { data, error }
+}
+
+// ── Duplicar factura ──────────────────────────────────────
+export const duplicarFactura = async (facturaId) => {
+  const { data: original, error: errGet } = await getFactura(facturaId)
+  if (errGet || !original) return { data: null, error: errGet || new Error('Factura original no encontrada') }
+
+  const nuevaFactura = {
+    empresa_id: original.empresa_id,
+    cliente_id: original.cliente_id,
+    fecha_emision: new Date().toISOString().slice(0, 10),
+    fecha_vencimiento: null,
+    estado: 'borrador',
+    notas: original.notas || null,
+    recargo_equivalencia: original.recargo_equivalencia || false,
+    cp: original.cp || null,
+  }
+
+  const conceptosOriginales = (original.conceptos_factura || []).sort((a, b) => a.orden - b.orden)
+  const conceptosNuevos = conceptosOriginales.map(c => ({
+    descripcion: c.descripcion,
+    cantidad: c.cantidad,
+    precio_unitario: c.precio_unitario,
+    iva_tasa: c.iva_tasa,
+    descuento: c.descuento || 0,
+    recargo_tasa: c.recargo_tasa || 0,
+    recargo_importe: c.recargo_importe || 0,
+    subtotal: c.subtotal,
+    producto_id: c.producto_id || null,
+  }))
+
+  const { data: fact, error } = await createFactura(nuevaFactura, conceptosNuevos)
+  return { data: fact, error }
 }
