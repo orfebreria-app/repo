@@ -9,7 +9,6 @@ if (!supabaseUrl || !supabaseKey) {
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
-// ── Recargo de Equivalencia ─────────────────────────
 export const tasaRE = (ivaTasa) => {
   const t = Number(ivaTasa)
   if (t === 21) return 5.2
@@ -18,7 +17,6 @@ export const tasaRE = (ivaTasa) => {
   return 0
 }
 
-// ── Auth helpers ──────────────────────────
 export const signIn = (email, password) =>
   supabase.auth.signInWithPassword({ email, password })
 
@@ -31,7 +29,6 @@ export const signOut = () =>
 export const getUser = () =>
   supabase.auth.getUser()
 
-// ── Empresa helpers ─────────────────────────
 export const getEmpresa = async (userId) => {
   const { data, error } = await supabase
     .from('empresas')
@@ -50,7 +47,6 @@ export const upsertEmpresa = async (empresa) => {
   return { data, error }
 }
 
-// ── Clientes helpers ────────────────────────
 export const getClientes = async (empresaId) => {
   const { data, error } = await supabase
     .from('clientes')
@@ -74,7 +70,6 @@ export const deleteCliente = async (id) => {
   return { error }
 }
 
-// ── Facturas helpers ────────────────────────
 export const getFacturas = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas')
@@ -178,7 +173,6 @@ export const deleteFactura = async (id) => {
   return { error }
 }
 
-// ── Helpers de formato ──────────────────────
 export const formatEuro = (n) =>
   new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n || 0)
 
@@ -196,7 +190,6 @@ export const calcPrecioVentaSugerido = ({ precioCompra = 0, multiplicadorProduct
   return +(base * multiplicador).toFixed(2)
 }
 
-// ── Proveedores ────────────────────────
 export const getProveedores = async (empresaId) => {
   const { data, error } = await supabase
     .from('proveedores')
@@ -221,7 +214,6 @@ export const deleteProveedor = async (id) => {
   return { error }
 }
 
-// ── Productos ─────────────────────────
 export const getProductos = async (empresaId) => {
   const { data, error } = await supabase
     .from('productos')
@@ -246,7 +238,6 @@ export const deleteProducto = async (id) => {
   return { error }
 }
 
-// ── Movimientos de stock ──────────────────
 export const getMovimientos = async (empresaId, productoId = null) => {
   let q = supabase
     .from('movimientos_stock')
@@ -337,7 +328,6 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
   return { error: null }
 }
 
-// ── Facturas de proveedor (Compras) ─────────────
 export const getFacturasProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
@@ -425,7 +415,6 @@ export const deleteFacturaProveedor = async (id) => {
   return { error }
 }
 
-// ── Recargo de Equivalencia ─────────────────────────
 export const RE_TASAS = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
 
 export const calcRecargoLinea = (base, ivaTasa) => {
@@ -433,7 +422,6 @@ export const calcRecargoLinea = (base, ivaTasa) => {
   return +(base * reTasa / 100).toFixed(2)
 }
 
-// ── Editar factura completa ─────────────────
 export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conceptosNuevos, conceptosOriginales) => {
   const { error: errCab } = await supabase
     .from('facturas')
@@ -479,7 +467,6 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
   return { error: null }
 }
 
-// ── Albaranes de proveedor ─────────────────
 export const getAlbaranesProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('albaranes_proveedor')
@@ -622,7 +609,6 @@ export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) =>
   return { data: fp, error: null }
 }
 
-// ── Informe de IVA ─────────────────────
 export const getFacturasParaInforme = async (empresaId, desde, hasta) => {
   const { data, error } = await supabase
     .from('facturas')
@@ -645,7 +631,6 @@ export const getComprasParaInforme = async (empresaId, desde, hasta) => {
   return { data: data || [], error }
 }
 
-// ── Verificación pública de facturas (para /verificar) ─
 export const verificarFactura = async ({ folio, nif, total, fecha }) => {
   const { data, error } = await supabase.rpc('verificar_factura', {
     p_folio: folio,
@@ -657,7 +642,6 @@ export const verificarFactura = async ({ folio, nif, total, fecha }) => {
   return { data: data?.[0] || null, error: null }
 }
 
-// ── Envío de email ───────────────────────
 export const enviarEmail = async ({ to, subject, html, fromName }) => {
   try {
     const res = await fetch('/api/send-email', {
@@ -672,11 +656,6 @@ export const enviarEmail = async ({ to, subject, html, fromName }) => {
     return { error: err.message }
   }
 }
-
-// ============================================================
-// AÑADIDO: Gestión avanzada de proveedores y precios masivos
-// (Nuevas funciones - no reemplazan nada existente)
-// ============================================================
 
 export const getProductosPorProveedor = async (proveedorId) => {
   const { data, error } = await supabase
@@ -749,4 +728,18 @@ export const aplicarPreciosMasivos = async ({ productosIds, coeficiente, forzarC
   }
   const errores = resultados.filter(r => r.error)
   return { resultados, error: errores.length > 0 ? errores : null }
+}
+
+// ── Alertas de stock ──────────────────────
+export const getProductosBajoMinimo = async (empresaId) => {
+  const { data, error } = await supabase
+    .from('productos')
+    .select('id, nombre, referencia, stock_actual, stock_minimo')
+    .eq('empresa_id', empresaId)
+    .eq('activo', true)
+    .gt('stock_minimo', 0)
+    .order('stock_actual', { ascending: true })
+  if (error) return { data: [], error }
+  const bajos = (data || []).filter(p => Number(p.stock_actual) <= Number(p.stock_minimo))
+  return { data: bajos, error: null }
 }
