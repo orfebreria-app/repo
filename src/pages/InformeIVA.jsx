@@ -62,6 +62,7 @@ export default function InformeIVA({ session }) {
   const recargoVentas = sumar(ventas, 'recargo')
   const baseCompras  = sumar(compras, 'base')
   const cuotaCompras  = sumar(compras, 'cuota')
+  const recargoCompras = sumar(compras, 'recargo')
 
   const resultado = +(cuotaVentas - cuotaCompras).toFixed(2)
 
@@ -114,6 +115,7 @@ export default function InformeIVA({ session }) {
             {recargoVentas > 0 && <Fila label="Recargo de equivalencia cobrado" valor={formatEuro(recargoVentas)} />}
             <Fila label="Base imponible compras" valor={formatEuro(baseCompras)} />
             <Fila label="IVA soportado (compras)" valor={formatEuro(cuotaCompras)} />
+            {recargoCompras > 0 && <Fila label="Recargo de equivalencia soportado (compras)" valor={formatEuro(recargoCompras)} />}
             <div className="border-t border-gray-800 my-2" />
             <Fila
               label={resultado >= 0 ? 'Resultado (a ingresar, estimado)' : 'Resultado (a compensar, estimado)'}

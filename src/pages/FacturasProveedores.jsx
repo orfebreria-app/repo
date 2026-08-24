@@ -31,8 +31,6 @@ const emptyForm = () => ({
   lineas: [lineaVacia()],
 })
 
-const ESTADOS = ['pendiente', 'pagada', 'vencida', 'cancelada']
-
 export default function FacturasProveedores({ session }) {
   const [empresa, setEmpresa]         = useState(null)
   const [proveedores, setProveedores] = useState([])
@@ -116,7 +114,7 @@ export default function FacturasProveedores({ session }) {
     const lineasDeAlbaranes = albaranesPendientes
       .filter(a => seleccionados.includes(a.id))
       .flatMap(a => (a.lineas_albaran_proveedor || []).map(l => ({
-        _id: l.id,
+        _id: Math.random().toString(36).slice(2),
         descripcion: l.descripcion,
         cantidad: l.cantidad,
         precio_unitario: l.precio_unitario,
@@ -125,9 +123,9 @@ export default function FacturasProveedores({ session }) {
         producto_id: l.producto_id,
         referencia: l.referencia || '',
       })))
-    setForm(f => ({ ...f, lineas: lineasDeAlbaranes }))
+    setForm(f => ({ ...f, lineas: lineasDeAlbaranes.length ? lineasDeAlbaranes : [lineaVacia()] }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seleccionados, modo])
+  }, [seleccionados])
 
   const setLinea = (id, campo, valor) => {
     setForm(f => ({ ...f, lineas: f.lineas.map(l => l._id === id ? { ...l, [campo]: valor } : l) }))
@@ -227,18 +225,13 @@ export default function FacturasProveedores({ session }) {
     closeModal()
   }
 
-  const cambiarEstado = async (id, estado) => {
-    await updateEstadoFacturaProveedor(id, estado)
-    await cargar(empresa)
-  }
-
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar esta factura de proveedor? Esto no revierte el stock que sumó al crearla.')) return
+    if (!confirm('¿Eliminar esta factura de proveedor?')) return
     await deleteFacturaProveedor(id)
     await cargar(empresa)
   }
 
-  const filtradas = filtroEstado ? facturas.filter(f => f.estado === filtroEstado) : facturas
+  const filtrados = filtroEstado ? facturas.filter(f => f.estado === filtroEstado) : facturas
 
   if (loading) return <Skeleton />
 
@@ -247,7 +240,7 @@ export default function FacturasProveedores({ session }) {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold text-white">Facturas de proveedor</h1>
         <button onClick={openNew} className="btn-primary flex items-center gap-2" disabled={!proveedores.length}>
-          <span>+</span> Nueva factura de compra
+          <span>+</span> Nueva factura
         </button>
       </div>
 
@@ -257,15 +250,8 @@ export default function FacturasProveedores({ session }) {
         </div>
       )}
 
-      <div className="flex gap-2 flex-wrap">
-        <FiltroBtn label="Todas" activo={!filtroEstado} onClick={() => setFiltroEstado('')} />
-        {ESTADOS.map(e => (
-          <FiltroBtn key={e} label={e} activo={filtroEstado === e} onClick={() => setFiltroEstado(e)} />
-        ))}
-      </div>
-
       <div className="card p-0 overflow-hidden">
-        {filtradas.length === 0 ? (
+        {filtrados.length === 0 ? (
           <div className="text-center py-16 text-gray-600">
             <div className="text-4xl mb-3">📥</div>
             <p className="text-sm">Sin facturas de proveedor todavía.</p>
@@ -274,24 +260,19 @@ export default function FacturasProveedores({ session }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-800">
-                <Th>Proveedor</Th><Th>Nº</Th><Th>Fecha</Th><Th>Vencimiento</Th><Th>Estado</Th><Th className="text-right">Total</Th><Th />
+                <Th>Proveedor</Th><Th>Nº</Th><Th>Fecha</Th><Th>Estado</Th><Th className="text-right">Total</Th><Th />
               </tr>
             </thead>
             <tbody>
-              {filtradas.map(f => (
+              {filtrados.map(f => (
                 <tr key={f.id} className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors">
                   <td className="py-3 px-4 font-medium text-white">{f.proveedores?.nombre || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 font-mono text-xs">{f.numero || '—'}</td>
                   <td className="py-3 px-4 text-gray-400 text-xs">{formatFecha(f.fecha_factura)}</td>
-                  <td className="py-3 px-4 text-gray-400 text-xs">{f.fecha_vencimiento ? formatFecha(f.fecha_vencimiento) : '—'}</td>
                   <td className="py-3 px-4">
-                    <select
-                      value={f.estado}
-                      onChange={e => cambiarEstado(f.id, e.target.value)}
-                      className={`text-xs px-2 py-1 rounded-full font-medium border-0 cursor-pointer badge-${f.estado === 'pagada' ? 'pagada' : f.estado === 'vencida' ? 'vencida' : f.estado === 'cancelada' ? 'cancelada' : 'borrador'}`}
-                    >
-                      {ESTADOS.map(e => <option key={e} value={e}>{e}</option>)}
-                    </select>
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${f.estado === 'pagada' ? 'badge-pagada' : 'badge-borrador'}`}>
+                      {f.estado}
+                    </span>
                   </td>
                   <td className="py-3 px-4 text-right font-mono text-sm font-bold text-white">{formatEuro(f.total)}</td>
                   <td className="py-3 px-4 text-right">
@@ -321,11 +302,11 @@ export default function FacturasProveedores({ session }) {
                 </select>
               </div>
               <div>
-                <label className="label">Nº de factura del proveedor</label>
+                <label className="label">Nº de factura</label>
                 <input className="input" value={form.numero} onChange={e => setForm({...form, numero: e.target.value})} />
               </div>
               <div>
-                <label className="label">Fecha factura</label>
+                <label className="label">Fecha</label>
                 <input className="input" type="date" value={form.fecha_factura} onChange={e => setForm({...form, fecha_factura: e.target.value})} />
               </div>
               <div>
@@ -454,7 +435,7 @@ const Th = ({ children, className = '' }) => (
 )
 
 const FiltroBtn = ({ label, activo, onClick }) => (
-  <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-full font-medium capitalize transition-colors ${activo ? 'bg-brand-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+  <button onClick={onClick} className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${activo ? 'bg-brand-500 text-black' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
     {label}
   </button>
 )
@@ -469,7 +450,7 @@ function Modal({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-3xl">
+      <div className="relative bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full shadow-2xl overflow-y-auto max-h-[90vh] max-w-4xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-white">{title}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
