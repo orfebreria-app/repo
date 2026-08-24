@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase, getEmpresa, getFacturas, formatEuro, formatFecha } from '../lib/supabase'
+import { supabase, getEmpresa, getFacturas, getProductosBajoMinimo, formatEuro, formatFecha } from '../lib/supabase'
 
-// ── helpers ───────────────────────────────────────────────
 const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
 const hoy   = new Date()
 
@@ -17,11 +16,11 @@ const estadoBadge = (e) => ({
 const diasDesde = (fecha) =>
   Math.floor((hoy - new Date(fecha)) / (1000 * 60 * 60 * 24))
 
-// ── componente principal ──────────────────────────────────
 export default function Dashboard({ session }) {
   const [empresa,  setEmpresa]  = useState(null)
   const [facturas, setFacturas] = useState([])
   const [tickets,  setTickets]  = useState([])
+  const [stockBajo, setStockBajo] = useState([])
   const [loading,  setLoading]  = useState(true)
 
   useEffect(() => {
@@ -37,6 +36,8 @@ export default function Dashboard({ session }) {
           .eq('empresa_id', emp.id)
           .order('creado_en', { ascending: false })
         setTickets(ticks || [])
+        const { data: bajos } = await getProductosBajoMinimo(emp.id)
+        setStockBajo(bajos || [])
       }
       setLoading(false)
     }
@@ -45,7 +46,6 @@ export default function Dashboard({ session }) {
 
   if (loading) return <LoadingSkeleton />
 
-  // ── KPIs mes actual ────────────────────────────────────
   const mesActual  = hoy.getMonth()
   const anioActual = hoy.getFullYear()
   const mesPasado  = mesActual === 0 ? 11 : mesActual - 1
@@ -70,7 +70,6 @@ export default function Dashboard({ session }) {
   const vencidas  = facturas.filter(f => f.estado==='vencida')
   const facMes    = facturas.filter(f => { const d=new Date(f.fecha_emision); return d.getMonth()===mesActual && d.getFullYear()===anioActual })
 
-  // ── Datos gráfico (últimos 7 meses) ───────────────────
   const ultimos7 = Array.from({length:7},(_,i) => {
     const d = new Date(anioActual, mesActual - (6-i), 1)
     const m = d.getMonth(), a = d.getFullYear()
@@ -78,7 +77,6 @@ export default function Dashboard({ session }) {
   })
   const maxBar = Math.max(...ultimos7.map(x => x.total), 1)
 
-  // ── Artículos más vendidos (tickets) ──────────────────
   const conteoArticulos = {}
   tickets.forEach(t => {
     (t.lineas_ticket || []).forEach(l => {
@@ -94,7 +92,6 @@ export default function Dashboard({ session }) {
     .sort((a,b) => b.total - a.total)
     .slice(0, 5)
 
-  // ── Cobros pendientes ──────────────────────────────────
   const pendientes = facturas
     .filter(f => f.estado === 'emitida' || f.estado === 'vencida')
     .sort((a,b) => new Date(a.fecha_vencimiento||a.fecha_emision) - new Date(b.fecha_vencimiento||b.fecha_emision))
@@ -127,6 +124,33 @@ export default function Dashboard({ session }) {
         </div>
       )}
 
+      {/* Aviso de stock bajo mínimo */}
+      {stockBajo.length > 0 && (
+        <div className="bg-orange-900/20 border border-orange-700/40 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📦</span>
+              <span className="text-orange-400 font-semibold text-sm">
+                {stockBajo.length} artículo{stockBajo.length !== 1 ? 's' : ''} por debajo del stock mínimo
+              </span>
+            </div>
+            <Link to="/stock" className="text-xs bg-orange-800/50 hover:bg-orange-700/50 text-orange-300 px-3 py-1.5 rounded-lg transition-colors">
+              Ver Stock →
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {stockBajo.slice(0, 8).map(p => (
+              <span key={p.id} className="text-xs bg-orange-900/30 border border-orange-800/40 text-orange-300 px-2.5 py-1 rounded-full">
+                {p.nombre} · {p.stock_actual}/{p.stock_minimo}
+              </span>
+            ))}
+            {stockBajo.length > 8 && (
+              <span className="text-xs text-orange-500 px-2.5 py-1">+{stockBajo.length - 8} más</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPI icon="💰" label={`Ventas ${MESES[mesActual]}`} value={formatEuro(totalMesActual)} color="text-brand-500"
@@ -149,7 +173,6 @@ export default function Dashboard({ session }) {
       {/* Gráfico + Top artículos */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-        {/* Gráfico ventas 7 meses */}
         <div className="lg:col-span-2 card space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-white">📈 Ventas últimos 7 meses</h2>
@@ -175,7 +198,6 @@ export default function Dashboard({ session }) {
               )
             })}
           </div>
-          {/* Comparativa */}
           <div className="border-t border-gray-800 pt-3 grid grid-cols-2 gap-4">
             <div>
               <div className="text-xs text-gray-500">Este mes</div>
@@ -196,7 +218,6 @@ export default function Dashboard({ session }) {
           </div>
         </div>
 
-        {/* Top artículos */}
         <div className="card space-y-4">
           <h2 className="font-bold text-white">🏆 Más vendidos</h2>
           {topArticulos.length === 0 ? (
@@ -233,7 +254,6 @@ export default function Dashboard({ session }) {
         </div>
       </div>
 
-      {/* Cobros pendientes y vencidas */}
       {pendientes.length > 0 && (
         <div className="card space-y-4">
           <div className="flex items-center justify-between">
@@ -241,7 +261,6 @@ export default function Dashboard({ session }) {
             <Link to="/facturas" className="text-xs text-brand-500 hover:underline">Ver todas →</Link>
           </div>
 
-          {/* Alerta vencidas */}
           {vencidas.length > 0 && (
             <div className="bg-red-900/20 border border-red-800/40 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -305,7 +324,6 @@ export default function Dashboard({ session }) {
         </div>
       )}
 
-      {/* Últimas facturas */}
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-bold text-white">Últimas facturas</h2>
@@ -315,7 +333,6 @@ export default function Dashboard({ session }) {
           <div className="text-center py-12 text-gray-600">
             <div className="text-4xl mb-3">🧾</div>
             <p className="text-sm">Todavía no hay facturas.</p>
-            <Link to="/facturas/nueva" className="text-brand-500 text-sm hover:underline mt-1 inline-block">Crea tu primera factura</Link>
           </div>
         ) : (
           <div className="overflow-x-auto">
