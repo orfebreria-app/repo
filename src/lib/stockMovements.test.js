@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
+  ORIGENES_POR_FLUJO,
+  REFERENCIA_TIPOS,
+  buildStockPreviewLineas,
   calculateProductDeltas,
   compraDeltaFromEdit,
   ventaDeltaFromEdit,
@@ -88,7 +91,7 @@ describe('stockMovements — idempotencia y validaciones RPC', () => {
     expect(res.error?.message).toContain('Stock insuficiente')
   })
 
-  it('anulación reversa crea movimiento inverso por saldo neto', async () => {
+  it('anulación reversa crea una reversa por cada movimiento origen', async () => {
     const rpc = vi.fn(async () => ({ data: [{ aplicado: true, movimiento_id: 'm2' }], error: null }))
     const supabase = {
       rpc,
@@ -98,8 +101,8 @@ describe('stockMovements — idempotencia y validaciones RPC', () => {
             eq: vi.fn(() => ({
               in: vi.fn(async () => ({
                 data: [
-                  { producto_id: 'p1', cantidad: 2 },
-                  { producto_id: 'p1', cantidad: 1 },
+                  { id: 'origen-1', producto_id: 'p1', tipo: 'entrada', cantidad: 2 },
+                  { id: 'origen-2', producto_id: 'p1', tipo: 'salida_factura', cantidad: -1 },
                 ],
                 error: null,
               })),
@@ -113,13 +116,75 @@ describe('stockMovements — idempotencia y validaciones RPC', () => {
       supabase,
       empresaId: 'e1',
       referenciaId: 'doc-1',
-      referenciaTiposOrigen: ['factura_proveedor'],
-      referenciaTipoReversion: 'factura_proveedor_del',
+      referenciaTiposOrigen: ORIGENES_POR_FLUJO.factura_proveedor,
+      referenciaTipoReversion: REFERENCIA_TIPOS.FACTURA_PROVEEDOR_REVERSION,
       notas: 'test',
     })
 
     expect(res.error).toBeNull()
-    expect(rpc).toHaveBeenCalledTimes(1)
-    expect(rpc.mock.calls[0][1].p_cantidad).toBe(-3)
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(rpc.mock.calls[0][1].p_referencia_linea).toBe('reversion:origen-1')
+    expect(rpc.mock.calls[0][1].p_cantidad).toBe(-2)
+    expect(rpc.mock.calls[1][1].p_referencia_linea).toBe('reversion:origen-2')
+    expect(rpc.mock.calls[1][1].p_cantidad).toBe(1)
+  })
+
+  it('doble reversión reutiliza la misma clave idempotente por movimiento origen', async () => {
+    const rpc = vi
+      .fn(async () => ({ data: [{ aplicado: true, movimiento_id: 'm-rv' }], error: null }))
+      .mockImplementationOnce(async () => ({ data: [{ aplicado: true, movimiento_id: 'm-rv' }], error: null }))
+      .mockImplementationOnce(async () => ({ data: [{ aplicado: false, movimiento_id: 'm-rv' }], error: null }))
+    const supabase = {
+      rpc,
+      from: vi.fn(() => ({
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [{ id: 'origen-1', producto_id: 'p1', tipo: 'entrada', cantidad: 2 }],
+                error: null,
+              })),
+            })),
+          })),
+        })),
+      })),
+    }
+
+    const payload = {
+      supabase,
+      empresaId: 'e1',
+      referenciaId: 'doc-2',
+      referenciaTiposOrigen: ORIGENES_POR_FLUJO.factura,
+      referenciaTipoReversion: REFERENCIA_TIPOS.FACTURA_REVERSION,
+      notas: 'test',
+    }
+
+    await revertirMovimientosDocumento(payload)
+    await revertirMovimientosDocumento(payload)
+
+    expect(rpc).toHaveBeenCalledTimes(2)
+    expect(rpc.mock.calls[0][1].p_referencia_linea).toBe('reversion:origen-1')
+    expect(rpc.mock.calls[1][1].p_referencia_linea).toBe('reversion:origen-1')
+  })
+})
+
+describe('stockMovements — preview secuencial de regularización', () => {
+  it('acumula stock por producto cuando una factura repite líneas del mismo producto', () => {
+    const lineas = [
+      { id: 'l1', producto_id: 'p1', cantidad: 2, descripcion: 'A' },
+      { id: 'l2', producto_id: 'p1', cantidad: 3, descripcion: 'A' },
+      { id: 'l3', producto_id: 'p2', cantidad: 1, descripcion: 'B' },
+    ]
+    const productos = [
+      { id: 'p1', nombre: 'Prod 1', referencia: 'R1', stock_actual: 10, unidad: 'ud' },
+      { id: 'p2', nombre: 'Prod 2', referencia: 'R2', stock_actual: 4, unidad: 'ud' },
+    ]
+    const movimientosAplicados = [{ producto_id: 'p1', referencia_linea: 'l1', cantidad: 2 }]
+
+    const preview = buildStockPreviewLineas({ lineasConProducto: lineas, productos, movimientosAplicados })
+
+    expect(preview[0]).toMatchObject({ referencia_linea: 'l1', stock_anterior: 8, stock_posterior: 10, ya_aplicada: true })
+    expect(preview[1]).toMatchObject({ referencia_linea: 'l2', stock_anterior: 10, stock_posterior: 13, ya_aplicada: false })
+    expect(preview[2]).toMatchObject({ referencia_linea: 'l3', stock_anterior: 4, stock_posterior: 5, ya_aplicada: false })
   })
 })

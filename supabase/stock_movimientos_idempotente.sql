@@ -3,7 +3,7 @@
 -- =====================================================
 
 alter table movimientos_stock
-  alter column referencia_tipo type varchar(40);
+  alter column referencia_tipo type varchar(64);
 
 alter table movimientos_stock
   add column if not exists referencia_linea text;
@@ -11,6 +11,11 @@ alter table movimientos_stock
 alter table movimientos_stock
   alter column referencia_linea set default '';
 
+drop index if exists ux_movimientos_stock_idempotencia;
+
+-- Idempotencia explícita para flujos documentales.
+-- Los ajustes manuales no participan en esta clave para no bloquear
+-- ajustes legítimos cuando referencia_id sea null o no se use.
 create unique index if not exists ux_movimientos_stock_idempotencia
   on movimientos_stock (
     empresa_id,
@@ -19,7 +24,9 @@ create unique index if not exists ux_movimientos_stock_idempotencia
     referencia_linea,
     producto_id,
     tipo
-  );
+  )
+  where referencia_id is not null
+    and coalesce(referencia_tipo, '') <> 'manual';
 
 create index if not exists idx_movimientos_stock_referencia
   on movimientos_stock (empresa_id, referencia_tipo, referencia_id);
@@ -78,6 +85,8 @@ begin
     p_referencia_tipo, p_referencia_id, coalesce(p_referencia_linea, ''), p_notas
   )
   on conflict (empresa_id, referencia_tipo, referencia_id, referencia_linea, producto_id, tipo)
+  where referencia_id is not null
+    and coalesce(referencia_tipo, '') <> 'manual'
   do nothing
   returning id, movimientos_stock.stock_anterior, movimientos_stock.stock_posterior
   into v_movimiento_id, v_stock_anterior, v_stock_posterior;

@@ -138,7 +138,7 @@ export default function Tickets({ session }) {
 
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
 
-    await supabase.from('lineas_ticket').insert(
+    const { error: errLineas } = await supabase.from('lineas_ticket').insert(
       lineas.map((l, i) => {
         const { totalLinea, reImporte } = calcLinea(l, conRE)
         return {
@@ -155,12 +155,17 @@ export default function Tickets({ session }) {
         }
       })
     )
+    if (errLineas) {
+      await supabase.from('tickets').delete().eq('id', ticket.id)
+      alert('No se pudieron guardar las líneas del ticket: ' + errLineas.message)
+      setSaving(false)
+      return
+    }
 
     // Descontar stock automáticamente (sin permitir stock negativo)
     const { error: errStock } = await descontarStockVenta(empresa.id, lineas, ticket.id, 'ticket')
     if (errStock) {
-      await supabase.from('lineas_ticket').delete().eq('ticket_id', ticket.id)
-      await supabase.from('tickets').delete().eq('id', ticket.id)
+      await deleteTicketsConStock(empresa.id, [ticket.id])
       alert('No se pudo confirmar el ticket: ' + (errStock.message || 'stock insuficiente'))
       setSaving(false)
       return
