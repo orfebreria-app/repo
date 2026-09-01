@@ -70,16 +70,21 @@ export const deleteCliente = async (id) => {
   return { error }
 }
 
+export const parseFolioNum = (folio) =>
+  parseInt((folio || '').replace(/\D/g, '')) || 0
+
 export const getFacturas = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas')
     .select(`*, clientes(nombre, email)`)
     .eq('empresa_id', empresaId)
     .order('fecha_emision', { ascending: false })
+    .order('creado_en',     { ascending: false })
   const sorted = (data || []).sort((a, b) => {
-    const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
-    const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
-    return numB - numA
+    const diff = parseFolioNum(b.folio) - parseFolioNum(a.folio)
+    if (diff !== 0) return diff
+    // secondary: date descending
+    return (b.fecha_emision || '') < (a.fecha_emision || '') ? -1 : 1
   })
   return { data: sorted, error }
 }
@@ -145,7 +150,19 @@ export const getSiguienteFolioAtomico = async (empresaId) => {
     return { folio: null, error: error || errEmpresa || new Error('No se pudo obtener la empresa para el folio') }
   }
 
-  const siguienteNumero = Number(empresa.siguiente_folio ?? 1)
+  // Compute the real max folio number from existing invoices so legacy
+  // folios like FAC--0079 are taken into account, avoiding collisions.
+  const { data: facturasExistentes } = await supabase
+    .from('facturas')
+    .select('folio')
+    .eq('empresa_id', empresaId)
+
+  const maxExistente = (facturasExistentes || []).reduce((max, f) => {
+    const n = parseFolioNum(f.folio)
+    return n > max ? n : max
+  }, 0)
+
+  const siguienteNumero = Math.max(maxExistente + 1, Number(empresa.siguiente_folio ?? 1))
   const serie = String(empresa.serie || 'FAC').replace(/-+$/, '')
   const folioFallback = `${serie}-${String(siguienteNumero).padStart(4, '0')}`
 

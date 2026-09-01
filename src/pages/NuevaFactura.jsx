@@ -134,6 +134,7 @@ export default function NuevaFactura({ session }) {
     // Descontar stock
     await descontarStockVenta(empresa.id, lineas, fact.id, 'factura')
 
+    alert(`Factura guardada correctamente: ${fact?.folio || ''}`)
     navigate('/facturas')
   }
 
