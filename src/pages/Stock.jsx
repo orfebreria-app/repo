@@ -11,8 +11,6 @@ import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
 const TABS = ['📦 Productos', '🏭 Proveedores', '📚 Catálogos', '🧾 Compras', '📋 Movimientos']
 
 const CATEGORIAS = ['Trofeos', 'Medallas', 'Placas', 'Figuras', 'Copas', 'Peanas', 'Llaveros', 'Escudos', 'Material grabación', 'Otros']
-const FACTURA_CANDIDATA_REGULARIZACION_ID = 'a1847564-e8d1-4973-9dba-65fd04a0def3'
-const FACTURA_CANDIDATA_REGULARIZACION_NUMERO = 'FV263931'
 
 export default function Stock({ session }) {
   const [tab, setTab]           = useState(0)
@@ -383,6 +381,11 @@ export default function Stock({ session }) {
             <input className="input max-w-xs" placeholder="🔍 Buscar proveedor o nº factura..."
               value={busquedaCompras} onChange={e => setBusquedaCompras(e.target.value)} />
           </div>
+          <div className="text-xs rounded-lg p-3 border border-yellow-800 bg-yellow-900/20 text-yellow-200">
+            Regularización histórica manual: usa la acción
+            <strong> “📥 Aplicar entrada”</strong> con previsualización y confirmación cuando una factura de proveedor
+            existente no tenga sus movimientos de stock aplicados.
+          </div>
           {/* KPIs compras */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
@@ -429,14 +432,7 @@ export default function Stock({ session }) {
                         {c.proveedores?.nombre || c.clientes?.nombre || <span className="text-gray-600">Sin emisor</span>}
                         {c.clientes?.nombre && <span className="ml-1 text-xs text-gray-500">(cliente)</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">
-                        {c.numero || '—'}
-                        {(c.id === FACTURA_CANDIDATA_REGULARIZACION_ID || c.numero === FACTURA_CANDIDATA_REGULARIZACION_NUMERO) && (
-                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-yellow-700 text-yellow-300 bg-yellow-900/30">
-                            candidata regularización
-                          </span>
-                        )}
-                      </td>
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.numero || '—'}</td>
                       <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.subtotal)}</td>
                       <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.iva_total)}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: '#C9A84C' }}>{formatEuro(c.recargo_total || 0)}</td>
@@ -461,11 +457,7 @@ export default function Stock({ session }) {
                         <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => setModalAplicarFactura(c)}
-                            className={`text-xs px-2 py-1 rounded border transition-colors ${
-                              c.id === FACTURA_CANDIDATA_REGULARIZACION_ID || c.numero === FACTURA_CANDIDATA_REGULARIZACION_NUMERO
-                                ? 'bg-yellow-900/30 text-yellow-300 border-yellow-700 hover:bg-yellow-900/50'
-                                : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
-                            }`}
+                            className="text-xs px-2 py-1 rounded border transition-colors bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700"
                             title="Acción explícita con previsualización y confirmación"
                           >
                             📥 Aplicar entrada
@@ -689,7 +681,12 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
         empresaId,
         data.id,
         stockInicialSolicitado,
-        'Stock inicial al crear producto'
+        'Stock inicial al crear producto',
+        {
+          referenciaTipo: 'producto_alta',
+          referenciaId: data.id,
+          referenciaLinea: 'stock-inicial',
+        }
       )
       if (errStock) { alert('Producto guardado pero no se pudo aplicar stock inicial: ' + errStock.message); setSaving(false); return }
     }

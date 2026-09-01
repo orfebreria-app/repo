@@ -354,16 +354,16 @@ export const descontarStockVenta = async (empresaId, lineas, referenciaId, refer
   return { error: null }
 }
 
-export const entradaStock = async (empresaId, productoId, cantidad, notas = '') => {
+export const entradaStock = async (empresaId, productoId, cantidad, notas = '', options = {}) => {
   const movimiento = await registrarMovimientoStock({
     supabase,
     empresaId,
     productoId,
     tipo: 'entrada',
     cantidad: Number(cantidad),
-    referenciaTipo: 'manual',
-    referenciaId: null,
-    referenciaLinea: `manual:${new Date().toISOString()}`,
+    referenciaTipo: options.referenciaTipo || 'manual',
+    referenciaId: options.referenciaId ?? null,
+    referenciaLinea: options.referenciaLinea || '',
     notas: notas || 'Entrada manual',
     permitirStockNegativo: false,
   })
@@ -372,28 +372,13 @@ export const entradaStock = async (empresaId, productoId, cantidad, notas = '') 
 }
 
 export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '') => {
-  const { data: prod } = await supabase
-    .from('productos')
-    .select('stock_actual')
-    .eq('id', productoId)
-    .single()
-  if (!prod) return { error: 'Producto no encontrado' }
-
-  const anterior = Number(prod.stock_actual)
-  const diff = Number(nuevoStock) - anterior
-  const movimiento = await registrarMovimientoStock({
-    supabase,
-    empresaId,
-    productoId,
-    tipo: diff >= 0 ? 'ajuste_positivo' : 'ajuste_negativo',
-    cantidad: diff,
-    referenciaTipo: 'manual',
-    referenciaId: null,
-    referenciaLinea: `ajuste:${new Date().toISOString()}`,
-    notas: notas || 'Ajuste manual',
-    permitirStockNegativo: false,
+  const { error } = await supabase.rpc('ajustar_stock_manual', {
+    p_empresa_id: empresaId,
+    p_producto_id: productoId,
+    p_nuevo_stock: Number(nuevoStock),
+    p_notas: notas || 'Ajuste manual',
   })
-  if (movimiento.error) return { error: movimiento.error }
+  if (error) return { error }
   return { error: null }
 }
 
@@ -703,13 +688,15 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
   if (errCab) return { error: errCab }
 
   const lineasAntesStock = ESTADOS_VENTA_CON_STOCK.has(facturaActual.estado) ? (conceptosOriginales || []) : []
-  const lineasDespuesStock = ESTADOS_VENTA_CON_STOCK.has(cabecera.estado) ? (conceptosNuevos || []) : []
+  const estadoFinal = cabecera.estado ?? facturaActual.estado
+  const lineasDespuesStock = ESTADOS_VENTA_CON_STOCK.has(estadoFinal) ? (conceptosNuevos || []) : []
 
-  const deltas = calculateProductDeltas(
-    lineasAntesStock,
-    lineasDespuesStock,
-    ventaDeltaFromEdit
-  )
+  const deltas = calculateProductDeltas(lineasAntesStock, lineasDespuesStock, ventaDeltaFromEdit)
+
+  await supabase.from('conceptos_factura').delete().eq('factura_id', facturaId)
+  const items = conceptosNuevos.map((c, i) => ({ ...c, factura_id: facturaId, orden: i }))
+  const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
+  if (errConc) return { error: errConc }
 
   for (const d of deltas) {
     const movimiento = await registrarMovimientoStock({
@@ -731,11 +718,6 @@ export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conc
     })
     if (movimiento.error) return { error: movimiento.error }
   }
-
-  await supabase.from('conceptos_factura').delete().eq('factura_id', facturaId)
-  const items = conceptosNuevos.map((c, i) => ({ ...c, factura_id: facturaId, orden: i }))
-  const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
-  if (errConc) return { error: errConc }
 
   return { error: null }
 }
