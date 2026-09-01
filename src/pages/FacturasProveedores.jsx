@@ -339,14 +339,16 @@ export default function FacturasProveedores({ session }) {
 
 
   const cambiarEstado = async (id, estado) => {
-    await updateEstadoFacturaProveedor(id, estado)
+    const { error: err } = await updateEstadoFacturaProveedor(id, estado)
+    if (err) return alert('No se pudo actualizar el estado: ' + err.message)
     await cargar(empresa)
   }
 
 
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar esta factura de proveedor? Esto no revierte el stock que sumó al crearla.')) return
-    await deleteFacturaProveedor(id)
+    if (!confirm('¿Eliminar esta factura de proveedor? Se revertirán únicamente los movimientos de stock originados por esta factura.')) return
+    const { error: err } = await deleteFacturaProveedor(id)
+    if (err) return alert('No se pudo eliminar la factura: ' + err.message)
     await cargar(empresa)
   }
 

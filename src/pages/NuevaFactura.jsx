@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro } from '../lib/supabase'
+import { getEmpresa, getClientes, getProductos, getFacturas, createFactura, deleteFactura, getSiguienteFolioAtomico, descontarStockVenta, formatEuro } from '../lib/supabase'
 import { calcLinea, calcularTotalesFactura, tasaRE } from '../lib/calculos'
 import { format, addDays } from 'date-fns'
 
@@ -131,8 +131,16 @@ export default function NuevaFactura({ session }) {
     const { data: fact, error: err } = await createFactura(facturaData, conceptos)
     if (err) { setError(err.message); setSaving(false); return }
 
-    // Descontar stock
-    await descontarStockVenta(empresa.id, lineas, fact.id, 'factura')
+    // Descontar stock solo cuando la factura queda emitida/confirmada
+    if (['emitida', 'pagada', 'vencida'].includes(form.estado)) {
+      const { error: errStock } = await descontarStockVenta(empresa.id, lineas, fact.id, 'factura')
+      if (errStock) {
+        await deleteFactura(fact.id)
+        setError(errStock.message || 'No se pudo descontar stock')
+        setSaving(false)
+        return
+      }
+    }
 
     alert(`Factura guardada correctamente: ${fact?.folio || ''}`)
     navigate('/facturas')
