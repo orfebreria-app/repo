@@ -348,7 +348,7 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
 export const getFacturasProveedor = async (empresaId) => {
   const { data, error } = await supabase
     .from('facturas_proveedor')
-    .select('*, proveedores(nombre), clientes(nombre), vencimientos_factura_proveedor(*)')
+    .select('*, proveedores(nombre), vencimientos_factura_proveedor(*)')
     .eq('empresa_id', empresaId)
     .order('fecha_factura', { ascending: false })
   return { data: data || [], error }
@@ -401,11 +401,12 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
       if (prov?.multiplicador_venta) multiplicadorProveedor = Number(prov.multiplicador_venta)
     }
 
-    const precioCompra = Number(linea.precio_unitario) || 0
-    const payload = { precio_compra: precioCompra }
+    // Regla comercial: usar precio_unitario_base (sin descuento) para precio_venta
+    const precioBase = Number(linea.precio_unitario_base ?? linea.precio_unitario) || 0
+    const payload = { precio_compra: precioBase }
     if (!prod.precio_venta_manual) {
       payload.precio_venta = calcPrecioVentaSugerido({
-        precioCompra,
+        precioCompra: precioBase,
         multiplicadorProducto: prod.multiplicador_venta,
         multiplicadorProveedor,
       })
@@ -430,6 +431,71 @@ export const updateEstadoFacturaProveedor = async (id, estado) => {
 export const deleteFacturaProveedor = async (id) => {
   const { error } = await supabase.from('facturas_proveedor').delete().eq('id', id)
   return { error }
+}
+
+export const updateFacturaProveedor = async (facturaId, empresaId, cabecera, lineasNuevas, vencimientos = []) => {
+  // Actualizar cabecera
+  const { error: errCab } = await supabase
+    .from('facturas_proveedor')
+    .update({ ...cabecera, actualizado_en: new Date().toISOString() })
+    .eq('id', facturaId)
+  if (errCab) return { error: errCab }
+
+  // Reemplazar líneas (eliminar + reinsertar)
+  const { error: errDel } = await supabase.from('lineas_factura_proveedor').delete().eq('factura_id', facturaId)
+  if (errDel) return { error: errDel }
+
+  if (lineasNuevas.length > 0) {
+    const items = lineasNuevas.map((l, i) => ({ ...l, factura_id: facturaId, orden: i }))
+    const { error: errIns } = await supabase.from('lineas_factura_proveedor').insert(items)
+    if (errIns) return { error: errIns }
+  }
+
+  // Reemplazar vencimientos
+  const { error: errDelV } = await supabase.from('vencimientos_factura_proveedor').delete().eq('factura_id', facturaId)
+  if (errDelV) return { error: errDelV }
+  if (vencimientos.length > 0) {
+    const plazos = vencimientos.map(v => ({
+      factura_id: facturaId, empresa_id: empresaId,
+      fecha: v.fecha, importe: Number(v.importe), notas: v.notas || null,
+    }))
+    const { error: errInsV } = await supabase.from('vencimientos_factura_proveedor').insert(plazos)
+    if (errInsV) return { error: errInsV }
+  }
+
+  // Actualizar precio_compra de productos (usar precio base sin descuento)
+  for (const linea of lineasNuevas.filter(l => l.producto_id)) {
+    const { data: prod } = await supabase
+      .from('productos')
+      .select('id, precio_venta_manual, multiplicador_venta, proveedor_id')
+      .eq('id', linea.producto_id)
+      .single()
+    if (!prod) continue
+
+    let multiplicadorProveedor = 2.5
+    if (prod.proveedor_id) {
+      const { data: prov } = await supabase
+        .from('proveedores')
+        .select('multiplicador_venta')
+        .eq('id', prod.proveedor_id)
+        .single()
+      if (prov?.multiplicador_venta) multiplicadorProveedor = Number(prov.multiplicador_venta)
+    }
+
+    // Regla comercial: usar precio_unitario_base (sin descuento) para precio_venta
+    const precioBase = Number(linea.precio_unitario_base ?? linea.precio_unitario) || 0
+    const payload = { precio_compra: precioBase }
+    if (!prod.precio_venta_manual) {
+      payload.precio_venta = calcPrecioVentaSugerido({
+        precioCompra: precioBase,
+        multiplicadorProducto: prod.multiplicador_venta,
+        multiplicadorProveedor,
+      })
+    }
+    await supabase.from('productos').update(payload).eq('id', linea.producto_id)
+  }
+
+  return { error: null }
 }
 
 export const RE_TASAS = { 21: 5.2, 10: 1.4, 4: 0.5, 0: 0 }
