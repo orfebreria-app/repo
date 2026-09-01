@@ -36,8 +36,11 @@ export default function Presupuestos({ session }) {
   const [buscar,    setBuscar]    = useState('')
   const [modal,     setModal]     = useState(false) // 'nuevo' | false
   const [editando,  setEditando]  = useState(null)  // presupuesto completo a editar
-  const [saving,    setSaving]    = useState(false)
-  const [error,     setError]     = useState('')
+  const [saving,         setSaving]         = useState(false)
+  const [error,          setError]          = useState('')
+  const [listError,      setListError]      = useState('')
+  const [listRefreshing, setListRefreshing] = useState(false)
+  const [savedNumero,    setSavedNumero]    = useState('')
   const [emailPres, setEmailPres] = useState(null)
   const [duplicandoId, setDuplicandoId] = useState(null)
 
@@ -52,11 +55,19 @@ export default function Presupuestos({ session }) {
 
 
   const cargar = async (emp) => {
-    const { data } = await supabase
+    setListRefreshing(true)
+    const { data, error: err } = await supabase
       .from('presupuestos')
       .select('*, clientes(nombre,email)')
       .eq('empresa_id', emp.id)
-      .order('creado_en', { ascending: false })
+      .order('creado_en',    { ascending: false, nullsFirst: false })
+      .order('fecha_emision', { ascending: false, nullsFirst: false })
+    setListRefreshing(false)
+    if (err) {
+      setListError(err.message || 'Error al cargar presupuestos')
+      return
+    }
+    setListError('')
     setLista(data || [])
   }
 
@@ -96,6 +107,7 @@ export default function Presupuestos({ session }) {
     setLineas([lineaVacia()])
     setError('')
     setEditando(null)
+    setSavedNumero('')
     setModal(true)
   }
 
@@ -105,6 +117,7 @@ export default function Presupuestos({ session }) {
     if (!form.cliente_id) return setError('Selecciona un cliente')
     if (lineas.some(l => !l.descripcion.trim() || !l.precio_unitario)) return setError('Completa todos los conceptos')
     setSaving(true)
+    setSavedNumero('')
     const numero = `${empresa.serie_presupuesto||'PRE'}-${String(empresa.siguiente_presupuesto||1).padStart(4,'0')}`
 
 
@@ -122,9 +135,10 @@ export default function Presupuestos({ session }) {
     )
     await supabase.from('empresas').update({ siguiente_presupuesto:(empresa.siguiente_presupuesto||1)+1 }).eq('id',empresa.id)
     setEmpresa(e => ({ ...e, siguiente_presupuesto:(e.siguiente_presupuesto||1)+1 }))
-    await cargar(empresa)
     setSaving(false)
     setModal(false)
+    setSavedNumero(pres.numero)
+    await cargar(empresa)
   }
 
 
@@ -161,6 +175,7 @@ export default function Presupuestos({ session }) {
       }))
     )
     setError('')
+    setSavedNumero('')
     setEditando(pres)
     setModal(true)
   }
@@ -272,7 +287,7 @@ export default function Presupuestos({ session }) {
     setEmpresa(e => ({ ...e, siguiente_presupuesto: (e.siguiente_presupuesto || 1) + 1 }))
     await cargar(empresa)
     setDuplicandoId(null)
-    alert(`Presupuesto duplicado como borrador: ${nuevo.numero}`)
+    setSavedNumero(nuevo.numero)
   }
 
 
@@ -315,6 +330,21 @@ export default function Presupuestos({ session }) {
 
       {/* Tabla */}
       <div className="card p-0 overflow-hidden">
+        {listRefreshing && (
+          <div className="px-4 py-2 text-xs text-gray-400 border-b border-gray-800">Actualizando lista…</div>
+        )}
+        {listError && (
+          <div className="px-4 py-3 text-sm text-yellow-400 bg-yellow-900/20 border-b border-yellow-800/40 flex items-center justify-between gap-4">
+            <span>⚠️ No se pudo recargar la lista: {listError}. Si acabas de guardar, el presupuesto sí puede haber quedado registrado.</span>
+            <button onClick={() => empresa && cargar(empresa)} className="underline text-xs whitespace-nowrap">Reintentar</button>
+          </div>
+        )}
+        {savedNumero && !listError && (
+          <div className="px-4 py-3 text-sm text-green-400 bg-green-900/20 border-b border-green-800/40 flex items-center justify-between gap-4">
+            <span>✅ Presupuesto <strong>{savedNumero}</strong> guardado correctamente.</span>
+            <button onClick={() => setSavedNumero('')} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+          </div>
+        )}
         {filtrados.length === 0 ? (
           <div className="text-center py-16 text-gray-600">
             <div className="text-4xl mb-3">📋</div>
