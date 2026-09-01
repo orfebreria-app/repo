@@ -1,4 +1,16 @@
 import { createClient } from '@supabase/supabase-js'
+import {
+  ESTADOS_COMPRA_CON_STOCK,
+  ESTADOS_VENTA_CON_STOCK,
+  calculateProductDeltas,
+  compraDeltaFromEdit,
+  deltaRef,
+  getLineaRef,
+  registrarMovimientoStock,
+  revertirMovimientosDocumento,
+  shouldApplyFacturaProveedorDirectStock,
+  ventaDeltaFromEdit,
+} from './stockMovements'
 
 const supabaseUrl  = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey  = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -176,6 +188,39 @@ export const getSiguienteFolioAtomico = async (empresaId) => {
   return { folio: folioFallback, error: null }
 }
 export const updateEstadoFactura = async (id, estado) => {
+  const { data: facturaActual, error: errFactura } = await supabase
+    .from('facturas')
+    .select('id, empresa_id, estado, conceptos_factura(*)')
+    .eq('id', id)
+    .single()
+  if (errFactura) return { data: null, error: errFactura }
+
+  const teniaStock = ESTADOS_VENTA_CON_STOCK.has(facturaActual.estado)
+  const debeTenerStock = ESTADOS_VENTA_CON_STOCK.has(estado)
+
+  if (!teniaStock && debeTenerStock) {
+    const { error: errStock } = await descontarStockVenta(
+      facturaActual.empresa_id,
+      facturaActual.conceptos_factura || [],
+      facturaActual.id,
+      'factura'
+    )
+    if (errStock) return { data: null, error: errStock }
+  }
+
+  if (teniaStock && !debeTenerStock) {
+    const { error: errReverse } = await revertirMovimientosDocumento({
+      supabase,
+      empresaId: facturaActual.empresa_id,
+      referenciaId: facturaActual.id,
+      referenciaTiposOrigen: ['factura', 'factura_edicion'],
+      referenciaTipoReversion: 'factura_anulacion',
+      notas: 'Reversión por anulación/cambio de estado de factura',
+      permitirStockNegativo: false,
+    })
+    if (errReverse) return { data: null, error: errReverse }
+  }
+
   const { data, error } = await supabase
     .from('facturas')
     .update({ estado })
@@ -186,6 +231,24 @@ export const updateEstadoFactura = async (id, estado) => {
 }
 
 export const deleteFactura = async (id) => {
+  const { data: facturaActual, error: errFactura } = await supabase
+    .from('facturas')
+    .select('id, empresa_id')
+    .eq('id', id)
+    .single()
+  if (errFactura) return { error: errFactura }
+
+  const { error: errReverse } = await revertirMovimientosDocumento({
+    supabase,
+    empresaId: facturaActual.empresa_id,
+    referenciaId: facturaActual.id,
+    referenciaTiposOrigen: ['factura', 'factura_edicion'],
+    referenciaTipoReversion: 'factura_borrado',
+    notas: 'Reversión por borrado de factura',
+    permitirStockNegativo: false,
+  })
+  if (errReverse) return { error: errReverse }
+
   const { error } = await supabase.from('facturas').delete().eq('id', id)
   return { error }
 }
@@ -255,6 +318,7 @@ export const deleteProducto = async (id) => {
   return { error }
 }
 
+
 export const getMovimientos = async (empresaId, productoId = null) => {
   let q = supabase
     .from('movimientos_stock')
@@ -268,58 +332,42 @@ export const getMovimientos = async (empresaId, productoId = null) => {
 }
 
 export const descontarStockVenta = async (empresaId, lineas, referenciaId, referenciaTipo) => {
-  const lineasConProducto = lineas.filter(l => l.producto_id)
+  const lineasConProducto = (lineas || []).filter(l => l?.producto_id && Number(l.cantidad) > 0)
   if (!lineasConProducto.length) return { error: null }
 
-  for (const linea of lineasConProducto) {
-    const { data: prod } = await supabase
-      .from('productos')
-      .select('stock_actual')
-      .eq('id', linea.producto_id)
-      .single()
-
-    if (!prod) continue
-    const anterior = Number(prod.stock_actual)
-    const cantidad = Number(linea.cantidad)
-    const posterior = anterior - cantidad
-
-    await supabase
-      .from('productos')
-      .update({ stock_actual: posterior })
-      .eq('id', linea.producto_id)
-
-    await supabase.from('movimientos_stock').insert({
-      empresa_id:      empresaId,
-      producto_id:     linea.producto_id,
-      tipo:            referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
-      cantidad:        -cantidad,
-      stock_anterior:  anterior,
-      stock_posterior: posterior,
-      referencia_id:   referenciaId,
-      referencia_tipo: referenciaTipo,
+  for (let i = 0; i < lineasConProducto.length; i++) {
+    const linea = lineasConProducto[i]
+    const movimiento = await registrarMovimientoStock({
+      supabase,
+      empresaId,
+      productoId: linea.producto_id,
+      tipo: referenciaTipo === 'ticket' ? 'salida_ticket' : 'salida_factura',
+      cantidad: -Number(linea.cantidad),
+      referenciaTipo,
+      referenciaId,
+      referenciaLinea: getLineaRef(linea, i, `${referenciaTipo}-linea`),
+      notas: referenciaTipo === 'ticket' ? 'Salida por ticket' : 'Salida por factura',
+      permitirStockNegativo: false,
     })
+    if (movimiento.error) return { error: movimiento.error }
   }
   return { error: null }
 }
 
 export const entradaStock = async (empresaId, productoId, cantidad, notas = '') => {
-  const { data: prod } = await supabase
-    .from('productos')
-    .select('stock_actual')
-    .eq('id', productoId)
-    .single()
-  if (!prod) return { error: 'Producto no encontrado' }
-
-  const anterior = Number(prod.stock_actual)
-  const posterior = anterior + Number(cantidad)
-
-  await supabase.from('productos').update({ stock_actual: posterior }).eq('id', productoId)
-  await supabase.from('movimientos_stock').insert({
-    empresa_id: empresaId, producto_id: productoId,
-    tipo: 'entrada', cantidad: Number(cantidad),
-    stock_anterior: anterior, stock_posterior: posterior,
-    referencia_tipo: 'manual', notas,
+  const movimiento = await registrarMovimientoStock({
+    supabase,
+    empresaId,
+    productoId,
+    tipo: 'entrada',
+    cantidad: Number(cantidad),
+    referenciaTipo: 'manual',
+    referenciaId: null,
+    referenciaLinea: `manual:${new Date().toISOString()}`,
+    notas: notas || 'Entrada manual',
+    permitirStockNegativo: false,
   })
+  if (movimiento.error) return { error: movimiento.error }
   return { error: null }
 }
 
@@ -333,15 +381,19 @@ export const ajusteStock = async (empresaId, productoId, nuevoStock, notas = '')
 
   const anterior = Number(prod.stock_actual)
   const diff = Number(nuevoStock) - anterior
-
-  await supabase.from('productos').update({ stock_actual: Number(nuevoStock) }).eq('id', productoId)
-  await supabase.from('movimientos_stock').insert({
-    empresa_id: empresaId, producto_id: productoId,
+  const movimiento = await registrarMovimientoStock({
+    supabase,
+    empresaId,
+    productoId,
     tipo: diff >= 0 ? 'ajuste_positivo' : 'ajuste_negativo',
     cantidad: diff,
-    stock_anterior: anterior, stock_posterior: Number(nuevoStock),
-    referencia_tipo: 'manual', notas: notas || 'Ajuste manual',
+    referenciaTipo: 'manual',
+    referenciaId: null,
+    referenciaLinea: `ajuste:${new Date().toISOString()}`,
+    notas: notas || 'Ajuste manual',
+    permitirStockNegativo: false,
   })
+  if (movimiento.error) return { error: movimiento.error }
   return { error: null }
 }
 
@@ -374,6 +426,30 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
   const items = lineas.map((l, i) => ({ ...l, factura_id: fp.id, orden: i }))
   const { error: errL } = await supabase.from('lineas_factura_proveedor').insert(items)
   if (errL) return { data: null, error: errL }
+
+  if (shouldApplyFacturaProveedorDirectStock({ estado: fp.estado || factura.estado || 'pendiente', tieneAlbaranes: false })) {
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i]
+      if (!linea?.producto_id || Number(linea.cantidad) <= 0) continue
+      const movimiento = await registrarMovimientoStock({
+        supabase,
+        empresaId: factura.empresa_id,
+        productoId: linea.producto_id,
+        tipo: 'entrada',
+        cantidad: Number(linea.cantidad),
+        referenciaTipo: 'factura_proveedor',
+        referenciaId: fp.id,
+        referenciaLinea: getLineaRef(linea, i, 'fp-linea'),
+        notas: `Entrada por factura proveedor ${fp.numero || fp.id.slice(0, 8)}`,
+        permitirStockNegativo: false,
+      })
+      if (movimiento.error) {
+        await supabase.from('lineas_factura_proveedor').delete().eq('factura_id', fp.id)
+        await supabase.from('facturas_proveedor').delete().eq('id', fp.id)
+        return { data: null, error: movimiento.error }
+      }
+    }
+  }
 
   if (vencimientos.length > 0) {
     const plazos = vencimientos.map(v => ({
@@ -419,6 +495,50 @@ export const createFacturaProveedor = async (factura, lineas, vencimientos = [])
 }
 
 export const updateEstadoFacturaProveedor = async (id, estado) => {
+  const { data: facturaActual, error: errFactura } = await supabase
+    .from('facturas_proveedor')
+    .select('id, empresa_id, estado, lineas_factura_proveedor(*), albaranes_proveedor(id)')
+    .eq('id', id)
+    .single()
+  if (errFactura) return { data: null, error: errFactura }
+
+  const tieneAlbaranes = (facturaActual.albaranes_proveedor || []).length > 0
+  const teniaStock = ESTADOS_COMPRA_CON_STOCK.has(facturaActual.estado)
+  const debeTenerStock = ESTADOS_COMPRA_CON_STOCK.has(estado)
+
+  if (!teniaStock && shouldApplyFacturaProveedorDirectStock({ estado, tieneAlbaranes })) {
+    for (let i = 0; i < (facturaActual.lineas_factura_proveedor || []).length; i++) {
+      const linea = facturaActual.lineas_factura_proveedor[i]
+      if (!linea?.producto_id || Number(linea.cantidad) <= 0) continue
+      const movimiento = await registrarMovimientoStock({
+        supabase,
+        empresaId: facturaActual.empresa_id,
+        productoId: linea.producto_id,
+        tipo: 'entrada',
+        cantidad: Number(linea.cantidad),
+        referenciaTipo: 'factura_proveedor',
+        referenciaId: facturaActual.id,
+        referenciaLinea: getLineaRef(linea, i, 'fp-linea'),
+        notas: 'Entrada por cambio de estado de factura proveedor',
+        permitirStockNegativo: false,
+      })
+      if (movimiento.error) return { data: null, error: movimiento.error }
+    }
+  }
+
+  if (!tieneAlbaranes && teniaStock && !debeTenerStock) {
+    const { error: errReverse } = await revertirMovimientosDocumento({
+      supabase,
+      empresaId: facturaActual.empresa_id,
+      referenciaId: facturaActual.id,
+      referenciaTiposOrigen: ['factura_proveedor', 'factura_proveedor_edicion'],
+      referenciaTipoReversion: 'factura_proveedor_cancel',
+      notas: 'Reversión por anulación/cambio de estado de factura proveedor',
+      permitirStockNegativo: false,
+    })
+    if (errReverse) return { data: null, error: errReverse }
+  }
+
   const { data, error } = await supabase
     .from('facturas_proveedor')
     .update({ estado })
@@ -429,11 +549,43 @@ export const updateEstadoFacturaProveedor = async (id, estado) => {
 }
 
 export const deleteFacturaProveedor = async (id) => {
+  const { data: facturaActual, error: errFactura } = await supabase
+    .from('facturas_proveedor')
+    .select('id, empresa_id, albaranes_proveedor(id)')
+    .eq('id', id)
+    .single()
+  if (errFactura) return { error: errFactura }
+
+  const tieneAlbaranes = (facturaActual.albaranes_proveedor || []).length > 0
+  if (!tieneAlbaranes) {
+    const { error: errReverse } = await revertirMovimientosDocumento({
+      supabase,
+      empresaId: facturaActual.empresa_id,
+      referenciaId: facturaActual.id,
+      referenciaTiposOrigen: ['factura_proveedor', 'factura_proveedor_edicion'],
+      referenciaTipoReversion: 'factura_proveedor_del',
+      notas: 'Reversión por borrado de factura proveedor',
+      permitirStockNegativo: false,
+    })
+    if (errReverse) return { error: errReverse }
+  }
+
   const { error } = await supabase.from('facturas_proveedor').delete().eq('id', id)
   return { error }
 }
 
 export const updateFacturaProveedor = async (facturaId, empresaId, cabecera, lineasNuevas, vencimientos = []) => {
+  const { data: facturaActual, error: errFactura } = await supabase
+    .from('facturas_proveedor')
+    .select('id, estado, lineas_factura_proveedor(*), albaranes_proveedor(id)')
+    .eq('id', facturaId)
+    .single()
+  if (errFactura) return { error: errFactura }
+
+  const lineasOriginales = facturaActual.lineas_factura_proveedor || []
+  const tieneAlbaranes = (facturaActual.albaranes_proveedor || []).length > 0
+  const estadoFinal = cabecera.estado || facturaActual.estado
+
   // Actualizar cabecera
   const { error: errCab } = await supabase
     .from('facturas_proveedor')
@@ -495,6 +647,37 @@ export const updateFacturaProveedor = async (facturaId, empresaId, cabecera, lin
     await supabase.from('productos').update(payload).eq('id', linea.producto_id)
   }
 
+  if (!tieneAlbaranes) {
+    const lineasAntesStock = ESTADOS_COMPRA_CON_STOCK.has(facturaActual.estado) ? lineasOriginales : []
+    const lineasDespuesStock = ESTADOS_COMPRA_CON_STOCK.has(estadoFinal) ? lineasNuevas : []
+    const deltas = calculateProductDeltas(
+      lineasAntesStock,
+      lineasDespuesStock,
+      compraDeltaFromEdit
+    )
+
+    for (const d of deltas) {
+      const movimiento = await registrarMovimientoStock({
+        supabase,
+        empresaId,
+        productoId: d.producto_id,
+        tipo: d.delta > 0 ? 'entrada' : 'ajuste_negativo',
+        cantidad: d.delta,
+        referenciaTipo: 'factura_proveedor_edicion',
+        referenciaId: facturaId,
+        referenciaLinea: deltaRef({
+          scope: 'fp-edit',
+          productoId: d.producto_id,
+          cantidadAntes: d.cantidadAntes,
+          cantidadDespues: d.cantidadDespues,
+        }),
+        notas: `Ajuste por edición de factura proveedor ${cabecera.numero || facturaId.slice(0, 8)}`,
+        permitirStockNegativo: false,
+      })
+      if (movimiento.error) return { error: movimiento.error }
+    }
+  }
+
   return { error: null }
 }
 
@@ -506,46 +689,53 @@ export const calcRecargoLinea = (base, ivaTasa) => {
 }
 
 export const updateFacturaCompleta = async (facturaId, empresaId, cabecera, conceptosNuevos, conceptosOriginales) => {
+  const { data: facturaActual, error: errFacturaActual } = await supabase
+    .from('facturas')
+    .select('estado')
+    .eq('id', facturaId)
+    .single()
+  if (errFacturaActual) return { error: errFacturaActual }
+
   const { error: errCab } = await supabase
     .from('facturas')
     .update(cabecera)
     .eq('id', facturaId)
   if (errCab) return { error: errCab }
 
-  for (const c of (conceptosOriginales || []).filter(c => c.producto_id)) {
-    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
-    if (!prod) continue
-    const anterior  = Number(prod.stock_actual)
-    const posterior = anterior + Number(c.cantidad)
-    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
-    await supabase.from('movimientos_stock').insert({
-      empresa_id: empresaId, producto_id: c.producto_id,
-      tipo: 'ajuste_positivo', cantidad: Number(c.cantidad),
-      stock_anterior: anterior, stock_posterior: posterior,
-      referencia_id: facturaId, referencia_tipo: 'factura',
-      notas: 'Reversión por edición de factura',
+  const lineasAntesStock = ESTADOS_VENTA_CON_STOCK.has(facturaActual.estado) ? (conceptosOriginales || []) : []
+  const lineasDespuesStock = ESTADOS_VENTA_CON_STOCK.has(cabecera.estado) ? (conceptosNuevos || []) : []
+
+  const deltas = calculateProductDeltas(
+    lineasAntesStock,
+    lineasDespuesStock,
+    ventaDeltaFromEdit
+  )
+
+  for (const d of deltas) {
+    const movimiento = await registrarMovimientoStock({
+      supabase,
+      empresaId,
+      productoId: d.producto_id,
+      tipo: d.delta >= 0 ? 'ajuste_positivo' : 'salida_factura',
+      cantidad: d.delta,
+      referenciaTipo: 'factura_edicion',
+      referenciaId: facturaId,
+      referenciaLinea: deltaRef({
+        scope: 'factura-edit',
+        productoId: d.producto_id,
+        cantidadAntes: d.cantidadAntes,
+        cantidadDespues: d.cantidadDespues,
+      }),
+      notas: 'Ajuste por edición de factura',
+      permitirStockNegativo: false,
     })
+    if (movimiento.error) return { error: movimiento.error }
   }
 
   await supabase.from('conceptos_factura').delete().eq('factura_id', facturaId)
   const items = conceptosNuevos.map((c, i) => ({ ...c, factura_id: facturaId, orden: i }))
   const { error: errConc } = await supabase.from('conceptos_factura').insert(items)
   if (errConc) return { error: errConc }
-
-  for (const c of conceptosNuevos.filter(c => c.producto_id)) {
-    const { data: prod } = await supabase.from('productos').select('stock_actual').eq('id', c.producto_id).single()
-    if (!prod) continue
-    const anterior  = Number(prod.stock_actual)
-    const posterior = anterior - Number(c.cantidad)
-    await supabase.from('productos').update({ stock_actual: posterior }).eq('id', c.producto_id)
-    await supabase.from('movimientos_stock').insert({
-      empresa_id: empresaId, producto_id: c.producto_id,
-      tipo: 'salida_factura', cantidad: -Number(c.cantidad),
-      stock_anterior: anterior, stock_posterior: posterior,
-      referencia_id: facturaId, referencia_tipo: 'factura',
-      notas: 'Edición de factura',
-    })
-  }
 
   return { error: null }
 }
@@ -582,60 +772,57 @@ export const createAlbaranProveedor = async (albaran, lineas) => {
   const { error: errL } = await supabase.from('lineas_albaran_proveedor').insert(items)
   if (errL) return { data: null, error: errL }
 
-  for (const l of lineas.filter(l => l.producto_id && Number(l.cantidad) > 0)) {
-    await supabase.rpc('mover_stock', {
-      p_producto_id: l.producto_id,
-      p_delta: Number(l.cantidad),
-      p_tipo: 'entrada',
-      p_referencia_id: alb.id,
-      p_referencia_tipo: 'albaran',
-      p_notas: `Albarán ${albaran.numero || alb.id.slice(0, 8)}`,
+  for (let i = 0; i < lineas.length; i++) {
+    const l = lineas[i]
+    if (!l?.producto_id || Number(l.cantidad) <= 0) continue
+    const movimiento = await registrarMovimientoStock({
+      supabase,
+      empresaId: albaran.empresa_id,
+      productoId: l.producto_id,
+      tipo: 'entrada',
+      cantidad: Number(l.cantidad),
+      referenciaTipo: 'albaran_proveedor',
+      referenciaId: alb.id,
+      referenciaLinea: getLineaRef(l, i, 'alb-linea'),
+      notas: `Albarán ${albaran.numero || alb.id.slice(0, 8)}`,
+      permitirStockNegativo: false,
     })
+    if (movimiento.error) {
+      await supabase.from('lineas_albaran_proveedor').delete().eq('albaran_id', alb.id)
+      await supabase.from('albaranes_proveedor').delete().eq('id', alb.id)
+      return { data: null, error: movimiento.error }
+    }
   }
 
   return { data: alb, error: null }
 }
 
 export const updateAlbaranProveedor = async (albaranId, cabecera, lineasNuevas, lineasOriginales) => {
-  const idsOriginalesUsados = new Set()
+  const deltas = calculateProductDeltas(
+    lineasOriginales || [],
+    lineasNuevas || [],
+    compraDeltaFromEdit
+  )
 
-  for (const nueva of lineasNuevas) {
-    if (!nueva.producto_id) continue
-    const original = nueva._id_original
-      ? lineasOriginales.find(o => o.id === nueva._id_original)
-      : null
-    if (original) idsOriginalesUsados.add(original.id)
-
-    const cantidadNueva = Number(nueva.cantidad) || 0
-    const cantidadAntigua = original ? Number(original.cantidad) || 0 : 0
-    const delta = cantidadNueva - cantidadAntigua
-
-    if (delta !== 0) {
-      await supabase.rpc('mover_stock', {
-        p_producto_id: nueva.producto_id,
-        p_delta: delta,
-        p_tipo: delta > 0 ? 'entrada' : 'ajuste_negativo',
-        p_referencia_id: albaranId,
-        p_referencia_tipo: 'albaran_edicion',
-        p_notas: `Edición de albarán ${cabecera.numero || albaranId.slice(0, 8)}`,
-      })
-    }
-  }
-
-  for (const original of lineasOriginales) {
-    if (!original.producto_id) continue
-    if (idsOriginalesUsados.has(original.id)) continue
-    const cantidadAntigua = Number(original.cantidad) || 0
-    if (cantidadAntigua === 0) continue
-
-    await supabase.rpc('mover_stock', {
-      p_producto_id: original.producto_id,
-      p_delta: -cantidadAntigua,
-      p_tipo: 'ajuste_negativo',
-      p_referencia_id: albaranId,
-      p_referencia_tipo: 'albaran_edicion',
-      p_notas: `Línea eliminada al editar albarán ${cabecera.numero || albaranId.slice(0, 8)}`,
+  for (const d of deltas) {
+    const movimiento = await registrarMovimientoStock({
+      supabase,
+      empresaId: cabecera.empresa_id,
+      productoId: d.producto_id,
+      tipo: d.delta > 0 ? 'entrada' : 'ajuste_negativo',
+      cantidad: d.delta,
+      referenciaTipo: 'albaran_proveedor_edit',
+      referenciaId: albaranId,
+      referenciaLinea: deltaRef({
+        scope: 'alb-edit',
+        productoId: d.producto_id,
+        cantidadAntes: d.cantidadAntes,
+        cantidadDespues: d.cantidadDespues,
+      }),
+      notas: `Edición de albarán ${cabecera.numero || albaranId.slice(0, 8)}`,
+      permitirStockNegativo: false,
     })
+    if (movimiento.error) return { error: movimiento.error }
   }
 
   const { error: errDel } = await supabase.from('lineas_albaran_proveedor').delete().eq('albaran_id', albaranId)
@@ -667,6 +854,24 @@ export const updateAlbaranProveedor = async (albaranId, cabecera, lineasNuevas, 
 }
 
 export const deleteAlbaranProveedor = async (id) => {
+  const { data: albaran, error: errAlb } = await supabase
+    .from('albaranes_proveedor')
+    .select('id, empresa_id')
+    .eq('id', id)
+    .single()
+  if (errAlb) return { error: errAlb }
+
+  const { error: errReverse } = await revertirMovimientosDocumento({
+    supabase,
+    empresaId: albaran.empresa_id,
+    referenciaId: albaran.id,
+    referenciaTiposOrigen: ['albaran_proveedor', 'albaran_proveedor_edit'],
+    referenciaTipoReversion: 'albaran_proveedor_del',
+    notas: 'Reversión por borrado de albarán',
+    permitirStockNegativo: false,
+  })
+  if (errReverse) return { error: errReverse }
+
   const { error } = await supabase.from('albaranes_proveedor').delete().eq('id', id)
   return { error }
 }
@@ -690,6 +895,122 @@ export const crearFacturaDesdeAlbaranes = async (factura, lineas, albaranIds) =>
   if (errUpd) return { data: null, error: errUpd }
 
   return { data: fp, error: null }
+}
+
+export const getFacturaProveedorStockPreview = async (facturaId) => {
+  const { data: factura, error } = await supabase
+    .from('facturas_proveedor')
+    .select('id, empresa_id, numero, estado, lineas_factura_proveedor(*), albaranes_proveedor(id)')
+    .eq('id', facturaId)
+    .single()
+  if (error) return { data: null, error }
+
+  const lineasConProducto = (factura.lineas_factura_proveedor || [])
+    .filter((l) => l.producto_id && Number(l.cantidad) > 0)
+  const productoIds = [...new Set(lineasConProducto.map((l) => l.producto_id))]
+
+  const [{ data: productos, error: errProductos }, { data: movimientosAplicados, error: errMovimientos }] = await Promise.all([
+    productoIds.length
+      ? supabase.from('productos').select('id, nombre, referencia, stock_actual, unidad').in('id', productoIds)
+      : Promise.resolve({ data: [] }),
+    supabase
+      .from('movimientos_stock')
+      .select('id, referencia_linea, producto_id, cantidad')
+      .eq('empresa_id', factura.empresa_id)
+      .eq('referencia_tipo', 'factura_proveedor')
+      .eq('referencia_id', factura.id),
+  ])
+  if (errProductos) return { data: null, error: errProductos }
+  if (errMovimientos) return { data: null, error: errMovimientos }
+
+  const productosMap = new Map((productos || []).map((p) => [p.id, p]))
+  const aplicadosMap = new Map(
+    (movimientosAplicados || []).map((m) => [`${m.producto_id}:${m.referencia_linea || ''}`, m])
+  )
+
+  const previewLineas = lineasConProducto.map((linea, index) => {
+    const refLinea = getLineaRef(linea, index, 'fp-linea')
+    const prod = productosMap.get(linea.producto_id)
+    const qty = Number(linea.cantidad) || 0
+    const aplicado = !!aplicadosMap.get(`${linea.producto_id}:${refLinea}`)
+    const stockAnterior = Number(prod?.stock_actual || 0)
+    const stockPosterior = aplicado ? stockAnterior : stockAnterior + qty
+    return {
+      id: linea.id,
+      referencia_linea: refLinea,
+      producto_id: linea.producto_id,
+      producto_nombre: prod?.nombre || linea.descripcion,
+      producto_referencia: prod?.referencia || null,
+      cantidad: qty,
+      unidad: prod?.unidad || 'ud',
+      stock_anterior: stockAnterior,
+      stock_posterior: stockPosterior,
+      ya_aplicada: aplicado,
+    }
+  })
+
+  return {
+    data: {
+      factura_id: factura.id,
+      empresa_id: factura.empresa_id,
+      numero: factura.numero,
+      estado: factura.estado,
+      tiene_albaranes: (factura.albaranes_proveedor || []).length > 0,
+      lineas: previewLineas,
+      ya_aplicada_completa: previewLineas.length > 0 && previewLineas.every((l) => l.ya_aplicada),
+    },
+    error: null,
+  }
+}
+
+export const aplicarEntradaStockFacturaProveedor = async (facturaId) => {
+  const { data: preview, error } = await getFacturaProveedorStockPreview(facturaId)
+  if (error) return { data: null, error }
+
+  if (preview.tiene_albaranes) {
+    return { data: null, error: new Error('Esta factura agrupa albaranes ya contabilizados. No se puede aplicar entrada directa.') }
+  }
+
+  for (const linea of preview.lineas) {
+    const movimiento = await registrarMovimientoStock({
+      supabase,
+      empresaId: preview.empresa_id,
+      productoId: linea.producto_id,
+      tipo: 'entrada',
+      cantidad: Number(linea.cantidad),
+      referenciaTipo: 'factura_proveedor',
+      referenciaId: preview.factura_id,
+      referenciaLinea: linea.referencia_linea,
+      notas: `Aplicación manual de entrada para factura ${preview.numero || preview.factura_id.slice(0, 8)}`,
+      permitirStockNegativo: false,
+    })
+    if (movimiento.error) return { data: null, error: movimiento.error }
+  }
+
+  return { data: { aplicada: true }, error: null }
+}
+
+export const deleteTicketsConStock = async (empresaId, ticketIds = []) => {
+  for (const ticketId of ticketIds) {
+    const { error: errReverse } = await revertirMovimientosDocumento({
+      supabase,
+      empresaId,
+      referenciaId: ticketId,
+      referenciaTiposOrigen: ['ticket', 'ticket_edicion'],
+      referenciaTipoReversion: 'ticket_borrado',
+      notas: 'Reversión por anulación/borrado de ticket',
+      permitirStockNegativo: false,
+    })
+    if (errReverse) return { error: errReverse }
+
+    const { error: errLineas } = await supabase.from('lineas_ticket').delete().eq('ticket_id', ticketId)
+    if (errLineas) return { error: errLineas }
+
+    const { error: errTicket } = await supabase.from('tickets').delete().eq('id', ticketId)
+    if (errTicket) return { error: errTicket }
+  }
+
+  return { error: null }
 }
 
 export const getFacturasParaInforme = async (empresaId, desde, hasta) => {

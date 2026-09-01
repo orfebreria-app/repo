@@ -187,8 +187,9 @@ export default function AlbaranesProveedor({ session }) {
   }
 
   const handleDelete = async (id) => {
-    if (!confirm('¿Eliminar este albarán? Esto no revierte el stock que sumó al recibirlo.')) return
-    await deleteAlbaranProveedor(id)
+    if (!confirm('¿Eliminar este albarán? Se revertirán únicamente los movimientos de stock originados por este albarán.')) return
+    const { error: err } = await deleteAlbaranProveedor(id)
+    if (err) return setError(err.message || 'No se pudo eliminar el albarán')
     await cargar(empresa)
   }
 

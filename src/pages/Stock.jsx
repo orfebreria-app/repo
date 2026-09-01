@@ -4,12 +4,15 @@ import { supabase, getEmpresa, getProductos, upsertProducto, deleteProducto,
          getProveedores, upsertProveedor, deleteProveedor,
          getMovimientos, entradaStock, ajusteStock,
          getFacturasProveedor, createFacturaProveedor,
+         getFacturaProveedorStockPreview, aplicarEntradaStockFacturaProveedor,
          updateEstadoFacturaProveedor, deleteFacturaProveedor,
          formatEuro, formatFecha, calcPrecioVentaSugerido } from '../lib/supabase'
 
 const TABS = ['📦 Productos', '🏭 Proveedores', '📚 Catálogos', '🧾 Compras', '📋 Movimientos']
 
 const CATEGORIAS = ['Trofeos', 'Medallas', 'Placas', 'Figuras', 'Copas', 'Peanas', 'Llaveros', 'Escudos', 'Material grabación', 'Otros']
+const FACTURA_CANDIDATA_REGULARIZACION_ID = 'a1847564-e8d1-4973-9dba-65fd04a0def3'
+const FACTURA_CANDIDATA_REGULARIZACION_NUMERO = 'FV263931'
 
 export default function Stock({ session }) {
   const [tab, setTab]           = useState(0)
@@ -29,6 +32,7 @@ export default function Stock({ session }) {
   const [modalEntrada, setModalEntrada]   = useState(null)
   const [modalAjuste, setModalAjuste]     = useState(null)
   const [modalCompra, setModalCompra]     = useState(false)
+  const [modalAplicarFactura, setModalAplicarFactura] = useState(null)
   const [compras, setCompras]             = useState([])
   const [imagenAmpliada, setImagenAmpliada] = useState(null)
   const [seccionesAbiertas, setSeccionesAbiertas] = useState({})
@@ -425,7 +429,14 @@ export default function Stock({ session }) {
                         {c.proveedores?.nombre || c.clientes?.nombre || <span className="text-gray-600">Sin emisor</span>}
                         {c.clientes?.nombre && <span className="ml-1 text-xs text-gray-500">(cliente)</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.numero || '—'}</td>
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">
+                        {c.numero || '—'}
+                        {(c.id === FACTURA_CANDIDATA_REGULARIZACION_ID || c.numero === FACTURA_CANDIDATA_REGULARIZACION_NUMERO) && (
+                          <span className="ml-2 text-[10px] px-2 py-0.5 rounded-full border border-yellow-700 text-yellow-300 bg-yellow-900/30">
+                            candidata regularización
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.subtotal)}</td>
                       <td className="px-4 py-3 text-gray-300 font-mono text-xs">{formatEuro(c.iva_total)}</td>
                       <td className="px-4 py-3 font-mono text-xs font-semibold" style={{ color: '#C9A84C' }}>{formatEuro(c.recargo_total || 0)}</td>
@@ -434,7 +445,8 @@ export default function Stock({ session }) {
                         <select
                           value={c.estado}
                           onChange={async (e) => {
-                            await updateEstadoFacturaProveedor(c.id, e.target.value)
+                            const { error } = await updateEstadoFacturaProveedor(c.id, e.target.value)
+                            if (error) return alert('No se pudo actualizar el estado: ' + error.message)
                             await cargar(empresa.id)
                           }}
                           className={`text-xs px-2 py-1 rounded-lg border bg-transparent cursor-pointer ${badgeClass}`}
@@ -446,13 +458,27 @@ export default function Stock({ session }) {
                         </select>
                       </td>
                       <td className="px-4 py-3">
-                        <button onClick={async () => {
-                          if (!confirm('¿Eliminar esta factura de compra?')) return
-                          await deleteFacturaProveedor(c.id)
-                          await cargar(empresa.id)
-                        }} className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-900 transition-colors">
-                          🗑
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => setModalAplicarFactura(c)}
+                            className={`text-xs px-2 py-1 rounded border transition-colors ${
+                              c.id === FACTURA_CANDIDATA_REGULARIZACION_ID || c.numero === FACTURA_CANDIDATA_REGULARIZACION_NUMERO
+                                ? 'bg-yellow-900/30 text-yellow-300 border-yellow-700 hover:bg-yellow-900/50'
+                                : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
+                            }`}
+                            title="Acción explícita con previsualización y confirmación"
+                          >
+                            📥 Aplicar entrada
+                          </button>
+                          <button onClick={async () => {
+                            if (!confirm('¿Eliminar esta factura de compra? Se revertirán solo sus movimientos de stock asociados.')) return
+                            const { error } = await deleteFacturaProveedor(c.id)
+                            if (error) return alert('No se pudo eliminar la factura: ' + error.message)
+                            await cargar(empresa.id)
+                          }} className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-400 hover:bg-red-900/60 border border-red-900 transition-colors">
+                            🗑
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )
@@ -522,6 +548,14 @@ export default function Stock({ session }) {
           empresaId={empresa.id}
           onClose={() => setModalCompra(false)}
           onSaved={() => { setModalCompra(false); cargar(empresa.id) }}
+        />
+      )}
+
+      {modalAplicarFactura && (
+        <ModalAplicarEntradaFacturaProveedor
+          factura={modalAplicarFactura}
+          onClose={() => setModalAplicarFactura(null)}
+          onApplied={() => { setModalAplicarFactura(null); cargar(empresa.id) }}
         />
       )}
 
@@ -633,6 +667,7 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
   const handleSave = async () => {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
     setSaving(true)
+    const stockInicialSolicitado = Number(form.stock_actual) || 0
     // Limpiar campos del join (proveedores) que no pertenecen a la tabla
     const { proveedores: _, ...formLimpio } = form
     const payload = {
@@ -642,13 +677,22 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
       multiplicador_venta: form.multiplicador_venta === '' ? null : Number(form.multiplicador_venta),
       precio_venta_manual: !!form.precio_venta_manual,
       iva_tasa:      Number(form.iva_tasa)      || 21,
-      stock_actual:  Number(form.stock_actual)  || 0,
+      stock_actual:  esNuevo ? 0 : Number(producto.stock_actual) || 0,
       stock_minimo:  Number(form.stock_minimo)  || 0,
       proveedor_id:  form.proveedor_id || null,
       imagen_url:    form.imagen_url || null,
     }
-    const { error } = await upsertProducto(payload)
+    const { data, error } = await upsertProducto(payload)
     if (error) { alert('Error al guardar: ' + error.message); setSaving(false); return }
+    if (esNuevo && stockInicialSolicitado > 0 && data?.id) {
+      const { error: errStock } = await entradaStock(
+        empresaId,
+        data.id,
+        stockInicialSolicitado,
+        'Stock inicial al crear producto'
+      )
+      if (errStock) { alert('Producto guardado pero no se pudo aplicar stock inicial: ' + errStock.message); setSaving(false); return }
+    }
     setSaving(false)
     onSaved()
   }
@@ -758,7 +802,17 @@ function ModalProducto({ producto, proveedores, empresaId, onClose, onSaved }) {
         </div>
         <div>
           <label className="label">Stock inicial / actual</label>
-          <input className="input" type="number" step="0.001" min="0" {...f('stock_actual')} />
+          <input
+            className="input"
+            type="number"
+            step="0.001"
+            min="0"
+            {...f('stock_actual')}
+            disabled={!esNuevo}
+          />
+          {!esNuevo && (
+            <p className="text-xs text-gray-600 mt-1">Para modificar stock usa Entrada/Ajuste (crea movimiento trazable).</p>
+          )}
         </div>
         <div>
           <label className="label">Stock mínimo (alerta)</label>
@@ -966,6 +1020,102 @@ function ModalAjuste({ producto, empresaId, onClose, onSaved }) {
         <button onClick={onClose} className="btn-secondary">Cancelar</button>
         <button onClick={handleSave} disabled={saving} className="btn-primary">
           {saving ? 'Guardando...' : '✅ Confirmar ajuste'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
+function ModalAplicarEntradaFacturaProveedor({ factura, onClose, onApplied }) {
+  const [preview, setPreview] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      const { data, error: err } = await getFacturaProveedorStockPreview(factura.id)
+      if (err) setError(err.message || 'No se pudo cargar la previsualización de stock')
+      else setPreview(data)
+      setLoading(false)
+    }
+    load()
+  }, [factura.id])
+
+  const confirmarAplicacion = async () => {
+    const numero = preview?.numero || factura.numero || factura.id.slice(0, 8)
+    const ok = confirm(`Vas a aplicar entrada de stock para la factura ${numero}. Esta acción crea movimientos trazables y no modifica histórico automáticamente. ¿Confirmas?`)
+    if (!ok) return
+    setSaving(true)
+    const { error: err } = await aplicarEntradaStockFacturaProveedor(factura.id)
+    setSaving(false)
+    if (err) {
+      setError(err.message || 'No se pudo aplicar la entrada de stock')
+      return
+    }
+    onApplied()
+  }
+
+  return (
+    <Modal title={`📥 Aplicar entrada de stock — ${factura.numero || factura.id.slice(0, 8)}`} onClose={onClose}>
+      {loading && <div className="text-sm text-gray-500">Cargando previsualización…</div>}
+      {!loading && error && <div className="text-sm text-red-400">{error}</div>}
+      {!loading && preview && (
+        <div className="space-y-3">
+          <div className="text-xs rounded-lg p-3 border border-yellow-800 bg-yellow-900/20 text-yellow-200">
+            Acción explícita con confirmación. No se regulariza histórico automáticamente.
+          </div>
+
+          {preview.tiene_albaranes && (
+            <div className="text-xs rounded-lg p-3 border border-red-800 bg-red-900/20 text-red-300">
+              Esta factura agrupa albaranes ya contabilizados: no debe volver a sumar stock.
+            </div>
+          )}
+
+          {preview.ya_aplicada_completa && (
+            <div className="text-xs rounded-lg p-3 border border-blue-800 bg-blue-900/20 text-blue-200">
+              Esta factura ya tiene aplicada la entrada de stock en todas sus líneas (idempotencia activa).
+            </div>
+          )}
+
+          <div className="card p-0 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-800">
+                  <th className="px-3 py-2 text-left">Producto</th>
+                  <th className="px-3 py-2 text-right">Cantidad</th>
+                  <th className="px-3 py-2 text-right">Stock antes</th>
+                  <th className="px-3 py-2 text-right">Stock después</th>
+                  <th className="px-3 py-2 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(preview.lineas || []).map((linea) => (
+                  <tr key={linea.id || `${linea.producto_id}:${linea.referencia_linea}`} className="border-b border-gray-800/50">
+                    <td className="px-3 py-2 text-gray-200">
+                      <div>{linea.producto_nombre}</div>
+                      {linea.producto_referencia && <div className="text-[10px] text-gray-500">{linea.producto_referencia}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">{linea.cantidad}</td>
+                    <td className="px-3 py-2 text-right font-mono text-gray-400">{linea.stock_anterior}</td>
+                    <td className="px-3 py-2 text-right font-mono text-green-300">{linea.stock_posterior}</td>
+                    <td className="px-3 py-2 text-center">{linea.ya_aplicada ? 'Ya aplicada' : 'Pendiente'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      <div className="flex justify-end gap-3 pt-2">
+        <button onClick={onClose} className="btn-secondary">Cerrar</button>
+        <button
+          onClick={confirmarAplicacion}
+          disabled={saving || loading || !preview || preview.tiene_albaranes}
+          className="btn-primary"
+        >
+          {saving ? 'Aplicando...' : 'Confirmar aplicación'}
         </button>
       </div>
     </Modal>

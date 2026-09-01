@@ -237,8 +237,17 @@ export default function Facturas({ session }) {
   }, [session])
 
 
-  const handleEstado  = async (id, estado) => { await updateEstadoFactura(id, estado); await cargar(empresa) }
-  const handleDelete  = async (id) => { if (!confirm('¿Eliminar esta factura?')) return; await deleteFactura(id); await cargar(empresa) }
+  const handleEstado  = async (id, estado) => {
+    const { error: err } = await updateEstadoFactura(id, estado)
+    if (err) return alert('No se pudo actualizar el estado: ' + err.message)
+    await cargar(empresa)
+  }
+  const handleDelete  = async (id) => {
+    if (!confirm('¿Eliminar esta factura? Se revertirán solo sus movimientos de stock asociados.')) return
+    const { error: err } = await deleteFactura(id)
+    if (err) return alert('No se pudo eliminar la factura: ' + err.message)
+    await cargar(empresa)
+  }
   const handlePDF     = async (id) => { const { data } = await getFactura(id); if (data) setPdfFactura(data) }
   const handleEdit    = async (id) => { const { data } = await getFactura(id); if (data) setEditFactura(data) }
   const handleDuplicar = async (id) => {

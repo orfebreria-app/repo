@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { supabase, getEmpresa, getProductos, descontarStockVenta, tasaRE, formatEuro } from '../lib/supabase'
+import { supabase, getEmpresa, getProductos, descontarStockVenta, deleteTicketsConStock, tasaRE, formatEuro } from '../lib/supabase'
 import { generarTicketPDF } from '../lib/ticketPDF'
 
 const IVA_OPCIONES = [0, 4, 10, 21]
@@ -156,8 +156,15 @@ export default function Tickets({ session }) {
       })
     )
 
-    // Descontar stock automáticamente
-    await descontarStockVenta(empresa.id, lineas, ticket.id, 'ticket')
+    // Descontar stock automáticamente (sin permitir stock negativo)
+    const { error: errStock } = await descontarStockVenta(empresa.id, lineas, ticket.id, 'ticket')
+    if (errStock) {
+      await supabase.from('lineas_ticket').delete().eq('ticket_id', ticket.id)
+      await supabase.from('tickets').delete().eq('id', ticket.id)
+      alert('No se pudo confirmar el ticket: ' + (errStock.message || 'stock insuficiente'))
+      setSaving(false)
+      return
+    }
 
     await supabase.from('empresas').update({ siguiente_ticket: numero + 1 }).eq('id', empresa.id)
     setEmpresa(e => ({ ...e, siguiente_ticket: numero + 1 }))
@@ -320,9 +327,10 @@ export default function Tickets({ session }) {
       setClaveBorrar('')
       return
     }
-    for (const id of seleccionados) {
-      await supabase.from('lineas_ticket').delete().eq('ticket_id', id)
-      await supabase.from('tickets').delete().eq('id', id)
+    const { error } = await deleteTicketsConStock(empresa.id, [...seleccionados])
+    if (error) {
+      setErrorClave(error.message || 'No se pudieron borrar los tickets con reversa de stock')
+      return
     }
     setModalBorrar(false)
     setClaveBorrar('')

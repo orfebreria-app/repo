@@ -140,3 +140,25 @@ facturacion/
 ¿Problemas con la configuración? Revisa:
 - [Documentación Supabase](https://supabase.com/docs)
 - [Documentación Vercel](https://vercel.com/docs)
+
+---
+
+## 🔧 Migración de stock robusto (idempotente)
+
+1. En Supabase SQL Editor ejecuta `supabase/stock_movimientos_idempotente.sql`.
+2. Verifica que existe la función `registrar_movimiento_stock(...)`.
+3. Verifica que existe el índice único `ux_movimientos_stock_idempotencia`.
+4. **No** ejecutes regularizaciones históricas automáticas.
+5. Para facturas de proveedor históricas usa la acción manual en **Stock → Compras → "📥 Aplicar entrada"** (con previsualización y confirmación).
+
+## ✅ Plan de validación recomendado
+
+1. Compra directa: crear factura proveedor con 1 línea producto/cantidad 1 y verificar +1 en stock y 1 movimiento.
+2. Albarán proveedor: crear con 1 línea y verificar +1 y movimiento único.
+3. Factura desde albaranes: facturar albarán ya contabilizado y verificar que no duplica stock.
+4. Edición compra/albarán: cambiar cantidades y verificar solo delta por producto.
+5. Anulación/borrado compra/albarán: verificar movimiento inverso sin borrar historial.
+6. Factura cliente y ticket: verificar salida -1 por línea al confirmar.
+7. Edición/anulación venta: verificar ajustes delta y reversa.
+8. Idempotencia: repetir la misma operación y comprobar que no duplica movimientos.
+9. Stock negativo: intentar venta sin stock suficiente y verificar rechazo (salvo opción explícita futura).
