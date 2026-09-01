@@ -452,13 +452,15 @@ export const updateFacturaProveedor = async (facturaId, empresaId, cabecera, lin
   }
 
   // Reemplazar vencimientos
-  await supabase.from('vencimientos_factura_proveedor').delete().eq('factura_id', facturaId)
+  const { error: errDelV } = await supabase.from('vencimientos_factura_proveedor').delete().eq('factura_id', facturaId)
+  if (errDelV) return { error: errDelV }
   if (vencimientos.length > 0) {
     const plazos = vencimientos.map(v => ({
       factura_id: facturaId, empresa_id: empresaId,
       fecha: v.fecha, importe: Number(v.importe), notas: v.notas || null,
     }))
-    await supabase.from('vencimientos_factura_proveedor').insert(plazos)
+    const { error: errInsV } = await supabase.from('vencimientos_factura_proveedor').insert(plazos)
+    if (errInsV) return { error: errInsV }
   }
 
   // Actualizar precio_compra de productos (usar precio base sin descuento)
