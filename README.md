@@ -143,13 +143,52 @@ facturacion/
 
 ---
 
-## 🔧 Migración de stock robusto (idempotente)
+## 🔧 Migración correctiva de atomicidad de stock
 
-1. En Supabase SQL Editor ejecuta `supabase/stock_movimientos_idempotente.sql`.
-2. Verifica que existe la función `registrar_movimiento_stock(...)`.
-3. Verifica que existe el índice único `ux_movimientos_stock_idempotencia`.
-4. **No** ejecutes regularizaciones históricas automáticas.
-5. Para facturas de proveedor históricas usa la acción manual en **Stock → Compras → "📥 Aplicar entrada"** (con previsualización y confirmación).
+### Orden recomendado
+
+1. Desplegar esta PR sobre `main` **sin ejecutar todavía SQL en producción**.
+2. En un entorno de pruebas/staging, ejecutar en este orden:
+   - `supabase/stock_movimientos_idempotente.sql`
+   - `supabase/documentos_stock_atomicos.sql`
+   - `supabase/tests_documentos_stock_atomicos.sql`
+3. Verificar que existen los RPC:
+   - `crear_factura_cliente_atomica`
+   - `actualizar_estado_factura_atomico`
+   - `eliminar_factura_atomica`
+   - `crear_factura_proveedor_atomica`
+   - `actualizar_factura_proveedor_atomica`
+   - `actualizar_estado_factura_proveedor_atomico`
+   - `eliminar_factura_proveedor_atomica`
+   - `crear_albaran_proveedor_atomico`
+   - `actualizar_albaran_proveedor_atomico`
+   - `eliminar_albaran_proveedor_atomico`
+   - `crear_factura_desde_albaranes_atomica`
+   - `aplicar_entrada_stock_factura_proveedor_atomica`
+   - `crear_ticket_atomico`
+   - `eliminar_tickets_atomico`
+4. Sólo después de validar staging, aplicar la migración SQL en producción.
+5. Desplegar el frontend que consume las RPCs.
+
+### Qué cubre esta corrección
+
+- Factura cliente: emisión, edición, anulación y borrado con stock atómico.
+- Factura proveedor directa: creación, edición, anulación y borrado con stock atómico.
+- Albarán proveedor: creación, edición y borrado con stock atómico.
+- Ticket: creación y borrado con stock atómico.
+- Facturas desde albaranes: siguen **sin** duplicar entrada de stock.
+
+### Rollback del despliegue
+
+1. Si falla el frontend pero la migración SQL está correcta, revertir sólo el despliegue web a la versión anterior.
+2. Si falla la migración en staging, corregir y repetir; **no** avanzar a producción.
+3. Si fuese necesario revertir en producción, detener primero el uso de operaciones de stock y volver a desplegar el frontend previo; los RPC nuevos no regularizan ni mutan histórico por sí solos.
+4. No ejecutar regularizaciones automáticas, ni alterar stock real manualmente como parte del rollback técnico.
+
+### Regularización diferida
+
+- **FV263931 no se regulariza automáticamente nunca.**
+- Cualquier regularización posterior debe hacerse **después** de esta corrección, mediante una acción explícita, validación humana y confirmación expresa.
 
 ## ✅ Plan de validación recomendado
 
@@ -162,3 +201,8 @@ facturacion/
 7. Edición/anulación venta: verificar ajustes delta y reversa.
 8. Idempotencia: repetir la misma operación y comprobar que no duplica movimientos.
 9. Stock negativo: intentar venta sin stock suficiente y verificar rechazo (salvo opción explícita futura).
+10. Ejecutar `supabase/tests_documentos_stock_atomicos.sql` en staging y revisar rollback de línea 2/3, fallo de cabecera, fallo de reinserción, fallo de reversa y doble reversa.
+
+## 🤖 CI
+
+- Cada PR ejecuta `npm test` mediante GitHub Actions (`.github/workflows/vitest.yml`).
