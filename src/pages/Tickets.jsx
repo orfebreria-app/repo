@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { supabase, getEmpresa, getProductos, descontarStockVenta, deleteTicketsConStock, tasaRE, formatEuro } from '../lib/supabase'
+import { supabase, createTicket, deleteTicketsConStock, getEmpresa, getProductos, tasaRE, formatEuro } from '../lib/supabase'
 import { generarTicketPDF } from '../lib/ticketPDF'
 
 const IVA_OPCIONES = [0, 4, 10, 21]
@@ -120,54 +120,35 @@ export default function Tickets({ session }) {
     setSaving(true)
     const numero = empresa.siguiente_ticket || 1
 
-    const { data: ticket, error } = await supabase
-      .from('tickets')
-      .insert({
-        empresa_id:         empresa.id,
-        numero,
-        subtotal:           +baseGeneral.toFixed(2),
-        iva_total:          ivaGeneral,
-        recargo_total:      reGeneral,
-        total:              +totalGeneral.toFixed(2),
-        metodo_pago:        metodo,
-        efectivo_entregado: metodo === 'efectivo' && efectivo ? Number(efectivo) : null,
-        cambio:             metodo === 'efectivo' && efectivo ? cambio : null,
-        notas:              notas || null,
-      })
-      .select().single()
-
+    const lineasTicket = lineas.map((l, i) => {
+      const { totalLinea, reImporte } = calcLinea(l, conRE)
+      return {
+        descripcion: l.descripcion,
+        cantidad: Number(l.cantidad),
+        precio_unitario: Number(l.precio_con_iva),
+        iva_tasa: Number(l.iva_tasa),
+        subtotal: totalLinea,
+        recargo_tasa: conRE ? tasaRE(l.iva_tasa) : 0,
+        recargo_importe: reImporte,
+        orden: i,
+        producto_id: l.producto_id || null,
+      }
+    })
+    const { data: ticket, error } = await createTicket({
+      empresa_id: empresa.id,
+      numero,
+      subtotal: +baseGeneral.toFixed(2),
+      iva_total: ivaGeneral,
+      recargo_total: reGeneral,
+      total: +totalGeneral.toFixed(2),
+      metodo_pago: metodo,
+      efectivo_entregado: metodo === 'efectivo' && efectivo ? Number(efectivo) : null,
+      cambio: metodo === 'efectivo' && efectivo ? cambio : null,
+      notas: notas || null,
+    }, lineasTicket)
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
 
-    await supabase.from('lineas_ticket').insert(
-      lineas.map((l, i) => {
-        const { totalLinea, reImporte } = calcLinea(l, conRE)
-        return {
-          ticket_id:       ticket.id,
-          descripcion:     l.descripcion,
-          cantidad:        Number(l.cantidad),
-          precio_unitario: Number(l.precio_con_iva),
-          iva_tasa:        Number(l.iva_tasa),
-          subtotal:        totalLinea,
-          recargo_tasa:    conRE ? tasaRE(l.iva_tasa) : 0,
-          recargo_importe: reImporte,
-          orden:           i,
-          producto_id:     l.producto_id || null,
-        }
-      })
-    )
-
-    // Descontar stock automáticamente (sin permitir stock negativo)
-    const { error: errStock } = await descontarStockVenta(empresa.id, lineas, ticket.id, 'ticket')
-    if (errStock) {
-      await supabase.from('lineas_ticket').delete().eq('ticket_id', ticket.id)
-      await supabase.from('tickets').delete().eq('id', ticket.id)
-      alert('No se pudo confirmar el ticket: ' + (errStock.message || 'stock insuficiente'))
-      setSaving(false)
-      return
-    }
-
-    await supabase.from('empresas').update({ siguiente_ticket: numero + 1 }).eq('id', empresa.id)
-    setEmpresa(e => ({ ...e, siguiente_ticket: numero + 1 }))
+    setEmpresa(e => ({ ...e, siguiente_ticket: (ticket?.numero || numero) + 1 }))
     setTicketOk({ ...ticket, lineas_ticket: lineas })
     await cargarHistorial(empresa.id)
     setSaving(false)
