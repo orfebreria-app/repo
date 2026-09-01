@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getEmpresa, getClientes, getProductos,
          getFacturas, getFactura, updateEstadoFactura, deleteFactura,
-         updateFacturaCompleta, duplicarFactura, tasaRE, formatEuro, formatFecha } from '../lib/supabase'
+         updateFacturaCompleta, duplicarFactura, tasaRE, formatEuro, formatFecha,
+         parseFolioNum } from '../lib/supabase'
 import { generarPDF } from '../lib/pdfGenerator'
 import { buildFacturaEXML, downloadXml } from '../lib/facturae'
 import { buildVerificationUrl } from '../lib/verificacion'
@@ -32,6 +33,7 @@ export default function Facturas({ session }) {
   const [empresa,     setEmpresa]     = useState(null)
   const [facturas,    setFacturas]    = useState([])
   const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState(null)
   const [filtro,      setFiltro]      = useState('todos')
   const [buscar,      setBuscar]      = useState('')
   const [pdfFactura,  setPdfFactura]  = useState(null)
@@ -44,14 +46,16 @@ export default function Facturas({ session }) {
 
 
   const sortFacturas = (arr) => [...(arr || [])].sort((a, b) => {
-    const numA = parseInt((a.folio || '').replace(/\D/g, '')) || 0
-    const numB = parseInt((b.folio || '').replace(/\D/g, '')) || 0
-    return numB - numA
+    const diff = parseFolioNum(b.folio) - parseFolioNum(a.folio)
+    if (diff !== 0) return diff
+    return (b.fecha_emision || '') < (a.fecha_emision || '') ? -1 : 1
   })
 
 
   const cargar = async (emp) => {
-    const { data } = await getFacturas(emp.id)
+    setError(null)
+    const { data, error: err } = await getFacturas(emp.id)
+    if (err) { setError(err.message || 'Error al cargar facturas'); return }
     setFacturas(sortFacturas(data))
   }
 
@@ -250,7 +254,7 @@ export default function Facturas({ session }) {
 
   const filtradas = sortFacturas(facturas
     .filter(f => filtro === 'todos' || f.estado === filtro)
-    .filter(f => f.folio.toLowerCase().includes(buscar.toLowerCase()) || (f.clientes?.nombre || '').toLowerCase().includes(buscar.toLowerCase()))
+    .filter(f => (f.folio || '').toLowerCase().includes(buscar.toLowerCase()) || (f.clientes?.nombre || '').toLowerCase().includes(buscar.toLowerCase()))
   )
 
 
@@ -267,6 +271,14 @@ export default function Facturas({ session }) {
 
 
   if (loading) return <Skeleton />
+
+  if (error) return (
+    <div className="max-w-5xl mx-auto mt-10 text-red-400 bg-red-900/30 rounded-lg p-6">
+      <p className="font-semibold">Error al cargar las facturas</p>
+      <p className="text-sm mt-1">{error}</p>
+      <button className="btn-secondary mt-4" onClick={() => empresa && cargar(empresa)}>Reintentar</button>
+    </div>
+  )
 
 
   return (
