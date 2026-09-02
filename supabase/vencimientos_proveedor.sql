@@ -11,5 +11,6 @@ CREATE TABLE IF NOT EXISTS vencimientos_factura_proveedor (
 );
 
 alter table vencimientos_factura_proveedor enable row level security;
+drop policy if exists "empresa_owner" on vencimientos_factura_proveedor;
 create policy "empresa_owner" on vencimientos_factura_proveedor
   using (empresa_id = (select id from empresas where user_id = auth.uid()));
