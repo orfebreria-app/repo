@@ -170,6 +170,13 @@ facturacion/
 4. Sólo después de validar staging, aplicar la migración SQL en producción.
 5. Desplegar el frontend que consume las RPCs.
 
+### Preflight de compatibilidad (solo verificación, sin migración)
+
+- Ejecutar `supabase/preflight_schema_compat_proveedor.sql` en staging/producción para validar tablas, columnas, constraints, RLS/policies y triggers requeridos.
+- El script es **solo lectura** (`begin transaction read only`) y no inserta/actualiza/borra datos.
+- `facturas_proveedor.cliente_id` se considera **opcional** en esta verificación. Si falta y se quiere usar a futuro, crear una migración **aditiva** separada.
+- No crear ni modificar movimientos de stock, no actualizar `productos.stock_actual`, y no regularizar registros de facturas/proveedor (incluida **FV263931**) durante este preflight.
+
 ### Qué cubre esta corrección
 
 - Factura cliente: emisión, edición, anulación y borrado con stock atómico.

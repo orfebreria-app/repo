@@ -36,11 +36,13 @@ create table if not exists lineas_factura_proveedor (
 alter table facturas_proveedor        enable row level security;
 alter table lineas_factura_proveedor  enable row level security;
 
+drop policy if exists "usuario ve sus facturas proveedor" on facturas_proveedor;
 create policy "usuario ve sus facturas proveedor"
   on facturas_proveedor for all using (
     empresa_id in (select id from empresas where user_id = auth.uid())
   );
 
+drop policy if exists "usuario ve sus lineas factura proveedor" on lineas_factura_proveedor;
 create policy "usuario ve sus lineas factura proveedor"
   on lineas_factura_proveedor for all using (
     factura_id in (
@@ -51,6 +53,7 @@ create policy "usuario ve sus lineas factura proveedor"
   );
 
 -- Trigger updated_at
+drop trigger if exists facturas_proveedor_actualizado_en on facturas_proveedor;
 create trigger facturas_proveedor_actualizado_en
   before update on facturas_proveedor
   for each row execute function update_actualizado_en();

@@ -65,22 +65,26 @@ alter table proveedores       enable row level security;
 alter table productos         enable row level security;
 alter table movimientos_stock enable row level security;
 
+drop policy if exists "usuario ve sus proveedores" on proveedores;
 create policy "usuario ve sus proveedores"
   on proveedores for all using (
     empresa_id in (select id from empresas where user_id = auth.uid())
   );
 
+drop policy if exists "usuario ve sus productos" on productos;
 create policy "usuario ve sus productos"
   on productos for all using (
     empresa_id in (select id from empresas where user_id = auth.uid())
   );
 
+drop policy if exists "usuario ve sus movimientos" on movimientos_stock;
 create policy "usuario ve sus movimientos"
   on movimientos_stock for all using (
     empresa_id in (select id from empresas where user_id = auth.uid())
   );
 
 -- ─── TRIGGER: actualizado_en en productos ───────────
+drop trigger if exists productos_actualizado_en on productos;
 create trigger productos_actualizado_en
   before update on productos
   for each row execute function update_actualizado_en();
