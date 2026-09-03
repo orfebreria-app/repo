@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getEmpresa, getFacturasParaInforme, getComprasParaInforme, formatEuro } from '../lib/supabase'
 import { agruparPorIva } from '../lib/calculos'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
 
 const TRIMESTRES = [
   { n: 1, label: '1T (ene-mar)', desde: (y) => `${y}-01-01`, hasta: (y) => `${y}-03-31` },
@@ -12,26 +10,6 @@ const TRIMESTRES = [
 ]
 
 const trimestreActual = () => Math.floor(new Date().getMonth() / 3) + 1
-
-const descargarBlob = (contenido, nombreArchivo, tipoMime) => {
-  const blob = new Blob([contenido], { type: tipoMime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = nombreArchivo
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
-const csvEscape = (valor) => {
-  const s = String(valor ?? '')
-  if (s.includes(';') || s.includes('"') || s.includes('\n')) {
-    return '"' + s.replace(/"/g, '""') + '"'
-  }
-  return s
-}
 
 export default function InformeIVA({ session }) {
   const [empresa, setEmpresa] = useState(null)
@@ -68,7 +46,7 @@ export default function InformeIVA({ session }) {
       getComprasParaInforme(empresa.id, desde, hasta),
     ])
 
-    const lineasVenta  = facturas.flatMap(f => f.conceptos_factura || [])
+    const lineasVenta = facturas.flatMap(f => f.conceptos_factura || [])
     const lineasCompra = facturasCompra.flatMap(f => f.lineas_factura_proveedor || [])
 
     setVentas(agruparPorIva(lineasVenta))
@@ -79,146 +57,20 @@ export default function InformeIVA({ session }) {
 
   const sumar = (grupos, campo) => (grupos || []).reduce((s, g) => s + g[campo], 0)
 
-  const baseVentas   = sumar(ventas, 'base')
+  const baseVentas    = sumar(ventas, 'base')
   const cuotaVentas   = sumar(ventas, 'cuota')
   const recargoVentas = sumar(ventas, 'recargo')
-  const baseCompras  = sumar(compras, 'base')
-  const cuotaCompras  = sumar(compras, 'cuota')
+  const baseCompras    = sumar(compras, 'base')
+  const cuotaCompras   = sumar(compras, 'cuota')
+  const recargoCompras = sumar(compras, 'recargo')
 
-  const resultado = +(cuotaVentas - cuotaCompras).toFixed(2)
-
-  const trimestreInfo = TRIMESTRES.find(t => t.n === trimestre)
-  const nombreBase = `informe-iva-${anio}-T${trimestre}`
-
-  const exportarCSV = () => {
-    const filas = []
-    filas.push(['Informe de IVA', `${trimestreInfo.label} ${anio}`])
-    filas.push([])
-    filas.push(['VENTAS EMITIDAS (IVA REPERCUTIDO)'])
-    filas.push(['Tipo IVA', 'Base', 'Cuota', 'Recargo'])
-    ;(ventas || []).forEach(g => filas.push([`${g.tasa}%`, g.base.toFixed(2), g.cuota.toFixed(2), (g.recargo || 0).toFixed(2)]))
-    filas.push([])
-    filas.push(['COMPRAS A PROVEEDORES (IVA SOPORTADO)'])
-    filas.push(['Tipo IVA', 'Base', 'Cuota', 'Recargo'])
-    ;(compras || []).forEach(g => filas.push([`${g.tasa}%`, g.base.toFixed(2), g.cuota.toFixed(2), (g.recargo || 0).toFixed(2)]))
-    filas.push([])
-    filas.push(['RESUMEN DEL PERIODO'])
-    filas.push(['Base imponible ventas', baseVentas.toFixed(2)])
-    filas.push(['IVA repercutido (ventas)', cuotaVentas.toFixed(2)])
-    if (recargoVentas > 0) filas.push(['Recargo de equivalencia cobrado', recargoVentas.toFixed(2)])
-    filas.push(['Base imponible compras', baseCompras.toFixed(2)])
-    filas.push(['IVA soportado (compras)', cuotaCompras.toFixed(2)])
-    filas.push([resultado >= 0 ? 'Resultado (a ingresar, estimado)' : 'Resultado (a compensar, estimado)', Math.abs(resultado).toFixed(2)])
-
-    const csv = '\uFEFF' + filas.map(fila => fila.map(csvEscape).join(';')).join('\r\n')
-    descargarBlob(csv, `${nombreBase}.csv`, 'text/csv;charset=utf-8;')
-  }
-
-  const exportarPDF = () => {
-    const doc = new jsPDF()
-    let y = 18
-
-    doc.setFontSize(16)
-    doc.setFont(undefined, 'bold')
-    doc.text('Informe de IVA', 14, y)
-    doc.setFontSize(11)
-    doc.setFont(undefined, 'normal')
-    y += 7
-    doc.text(`${empresa?.nombre || ''} · ${trimestreInfo.label} ${anio}`, 14, y)
-    y += 10
-
-    doc.setFontSize(12)
-    doc.setFont(undefined, 'bold')
-    doc.text(`Ventas emitidas (IVA repercutido) · ${contadores.facturas} factura${contadores.facturas !== 1 ? 's' : ''}`, 14, y)
-    y += 4
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Tipo IVA', 'Base', 'Cuota', 'Recargo']],
-      body: (ventas && ventas.length)
-        ? ventas.map(g => [`${g.tasa}%`, formatEuro(g.base), formatEuro(g.cuota), g.recargo > 0 ? formatEuro(g.recargo) : '—'])
-        : [['Sin datos en este periodo.', '', '', '']],
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [40, 40, 40] },
-      margin: { left: 14, right: 14 },
-    })
-    y = doc.lastAutoTable.finalY + 10
-
-    doc.setFontSize(12)
-    doc.setFont(undefined, 'bold')
-    doc.text(`Compras a proveedores (IVA soportado) · ${contadores.compras} factura${contadores.compras !== 1 ? 's' : ''}`, 14, y)
-    y += 4
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Tipo IVA', 'Base', 'Cuota', 'Recargo']],
-      body: (compras && compras.length)
-        ? compras.map(g => [`${g.tasa}%`, formatEuro(g.base), formatEuro(g.cuota), g.recargo > 0 ? formatEuro(g.recargo) : '—'])
-        : [['Sin datos en este periodo.', '', '', '']],
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [40, 40, 40] },
-      margin: { left: 14, right: 14 },
-    })
-    y = doc.lastAutoTable.finalY + 10
-
-    doc.setFontSize(12)
-    doc.setFont(undefined, 'bold')
-    doc.text('Resumen del periodo', 14, y)
-    y += 6
-    doc.setFontSize(10)
-    doc.setFont(undefined, 'normal')
-
-    const filasResumen = [
-      ['Base imponible ventas', formatEuro(baseVentas)],
-      ['IVA repercutido (ventas)', formatEuro(cuotaVentas)],
-    ]
-    if (recargoVentas > 0) filasResumen.push(['Recargo de equivalencia cobrado', formatEuro(recargoVentas)])
-    filasResumen.push(['Base imponible compras', formatEuro(baseCompras)])
-    filasResumen.push(['IVA soportado (compras)', formatEuro(cuotaCompras)])
-
-    autoTable(doc, {
-      startY: y,
-      body: filasResumen,
-      styles: { fontSize: 10 },
-      margin: { left: 14, right: 14 },
-      theme: 'plain',
-    })
-    y = doc.lastAutoTable.finalY + 4
-
-    doc.setFont(undefined, 'bold')
-    doc.setFontSize(11)
-    doc.text(
-      `${resultado >= 0 ? 'Resultado (a ingresar, estimado)' : 'Resultado (a compensar, estimado)'}: ${formatEuro(Math.abs(resultado))}`,
-      14, y
-    )
-    y += 10
-
-    doc.setFont(undefined, 'normal')
-    doc.setFontSize(8)
-    const aviso = 'Este resumen es orientativo, calculado directamente a partir de tus facturas y compras registradas. No sustituye el calculo de tu asesoria. Revisa esto con tu gestoria antes de presentar cualquier modelo.'
-    const lineasAviso = doc.splitTextToSize(aviso, 180)
-    doc.text(lineasAviso, 14, y)
-
-    doc.save(`${nombreBase}.pdf`)
-  }
+  const resultado = +(cuotaVentas - cuotaCompras - recargoCompras + recargoVentas).toFixed(2)
 
   if (loading) return <Skeleton />
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-2xl font-bold text-white">Informe de IVA</h1>
-        {!calculando && (
-          <div className="flex gap-2">
-            <button onClick={exportarCSV} className="btn-secondary text-sm flex items-center gap-2">
-              📊 Exportar Excel
-            </button>
-            <button onClick={exportarPDF} className="btn-secondary text-sm flex items-center gap-2">
-              📄 Exportar PDF
-            </button>
-          </div>
-        )}
-      </div>
+      <h1 className="text-2xl font-bold text-white">Informe de IVA</h1>
 
       <div className="card flex items-center gap-4 flex-wrap">
         <div>
@@ -263,6 +115,7 @@ export default function InformeIVA({ session }) {
             {recargoVentas > 0 && <Fila label="Recargo de equivalencia cobrado" valor={formatEuro(recargoVentas)} />}
             <Fila label="Base imponible compras" valor={formatEuro(baseCompras)} />
             <Fila label="IVA soportado (compras)" valor={formatEuro(cuotaCompras)} />
+            {recargoCompras > 0 && <Fila label="Recargo de equivalencia soportado" valor={formatEuro(recargoCompras)} />}
             <div className="border-t border-gray-800 my-2" />
             <Fila
               label={resultado >= 0 ? 'Resultado (a ingresar, estimado)' : 'Resultado (a compensar, estimado)'}
