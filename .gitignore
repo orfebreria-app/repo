@@ -1,5 +1,35 @@
-node_modules
-dist
+# Dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Environment files: only the redacted template may be committed
 .env
+.env.*
+!.env.example
+
+# Local secrets and credential material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+credentials*.json
+service-account*.json
+
+# Local databases, dumps, exports, and customer-data imports
+*.sql.bak
+*.dump
+*.bak
+*.sqlite
+*.sqlite3
+backup-*.json
+importar_clientes*.sql
+exportar_clientes*.sql
+clientes-*.csv
+clientes-*.xlsx
+
+# Logs and OS/editor files
+*.log
 .DS_Store
-*.local
+.vscode/
